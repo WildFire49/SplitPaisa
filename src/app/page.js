@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { FaPlus, FaWallet, FaUsers } from 'react-icons/fa';
+import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -92,6 +92,15 @@ function HomeContent() {
     }).format(amount);
   };
 
+  // Format date
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric'
+    });
+  };
+
   // Get friend name by ID
   const getFriendName = (friendId) => {
     const friend = friends.find(f => f.id === friendId);
@@ -169,28 +178,45 @@ function HomeContent() {
         <div>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold">Recent Expenses</h2>
-            <Link href="/dashboard">
-              <Button variant="outline">View All</Button>
+            <Link href="/expenses/new">
+              <Button variant="outline">Add New</Button>
             </Link>
           </div>
           
           {recentExpenses.length > 0 ? (
-            <div className="space-y-4">
-              {recentExpenses.map(expense => (
-                <Card key={expense.id} className="p-4">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-semibold">{expense.description}</h3>
-                      <p className="text-sm text-gray-500">
-                        Paid by {getFriendName(expense.paidBy)}
-                      </p>
+            <div className="space-y-3 max-h-[350px] overflow-auto pr-2">
+              {recentExpenses.map((expense, index) => (
+                <motion.div 
+                  key={expense.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center justify-between"
+                >
+                  <div className="flex items-center">
+                    <div className="p-2 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-500 mr-3">
+                      {expense.category === 'Food' ? (
+                        <FaTag className="text-sm" />
+                      ) : expense.category === 'Transport' ? (
+                        <FaTag className="text-sm" />
+                      ) : (
+                        <FaTag className="text-sm" />
+                      )}
                     </div>
-                    <div className="text-lg font-bold flex items-center">
-                      <IndianRupee className="h-4 w-4 mr-1" />
-                      {expense.amount.toFixed(2)}
+                    <div>
+                      <p className="font-medium">{expense.description}</p>
+                      <div className="flex items-center text-xs text-gray-500">
+                        <FaCalendarAlt className="mr-1" size={10} />
+                        <span>{formatDate(expense.created_at || expense.date)}</span>
+                        <span className="mx-1">•</span>
+                        <span>Paid by {getFriendName(expense.paid_by || expense.paidBy)}</span>
+                      </div>
                     </div>
                   </div>
-                </Card>
+                  <div className="font-bold text-right">
+                    ₹{parseFloat(expense.amount).toFixed(2)}
+                  </div>
+                </motion.div>
               ))}
             </div>
           ) : (
