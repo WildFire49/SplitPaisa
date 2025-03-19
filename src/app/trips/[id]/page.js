@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -37,6 +37,10 @@ function TripDetailsContent() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  
+  // Track if data has been fetched to prevent duplicate API calls
+  const dataFetched = useRef(false);
+  const pendingRequest = useRef(false);
 
   // Calculate settlements specific to this trip
   const calculateTripSettlements = useCallback((tripExpenses) => {
@@ -105,15 +109,30 @@ function TripDetailsContent() {
 
   useEffect(() => {
     const fetchTripData = async () => {
+      // Prevent duplicate API calls
+      if (pendingRequest.current) {
+        console.log('Trip data fetch already in progress, skipping duplicate call');
+        return;
+      }
+      
+      // Skip if data is already fetched
+      if (dataFetched.current && trip) {
+        console.log('Trip data already fetched, skipping fetch');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Skip fetching if tripId is not available or invalid
+      if (!tripId) {
+        console.error("Invalid trip ID:", params);
+        setLoadError("Invalid trip ID");
+        return;
+      }
+      
+      pendingRequest.current = true;
       setIsLoading(true);
+      
       try {
-        // Skip fetching if tripId is not available or invalid
-        if (!tripId) {
-          console.error("Invalid trip ID:", params);
-          setLoadError("Invalid trip ID");
-          return;
-        }
-        
         console.log("Fetching trip with ID:", tripId);
         const tripData = await getTripById(tripId);
         
@@ -130,18 +149,22 @@ function TripDetailsContent() {
         // Calculate trip-specific balances and settlements
         calculateTripSettlements(tripExpenses);
         setLoadError(null);
+        
+        // Mark data as fetched
+        dataFetched.current = true;
       } catch (err) {
         console.error("Error loading trip details:", err);
         setLoadError("Failed to load trip details. Please try again.");
       } finally {
         setIsLoading(false);
+        pendingRequest.current = false;
       }
     };
 
     if (!loading && tripId) {
       fetchTripData();
     }
-  }, [tripId, getTripById, getExpensesByTrip, calculateTripSettlements, loading, params]);
+  }, [tripId, getTripById, getExpensesByTrip, calculateTripSettlements, loading, trip, params]);
 
   // Calculate total expenses for this trip
   const totalExpenses = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);

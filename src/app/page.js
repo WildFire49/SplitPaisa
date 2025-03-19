@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { FaPlus, FaWallet, FaUsers } from 'react-icons/fa';
@@ -17,16 +17,38 @@ function HomeContent() {
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Track if data has been fetched to prevent duplicate API calls
+  const dataFetched = useRef(false);
+  const pendingRequest = useRef(false);
+
   useEffect(() => {
     // Refresh data when component mounts
     const refreshData = async () => {
+      // Prevent duplicate API calls
+      if (pendingRequest.current) {
+        console.log('Home data fetch already in progress, skipping duplicate call');
+        return;
+      }
+      
+      // Skip if data is already fetched
+      if (dataFetched.current) {
+        console.log('Home data already fetched, skipping fetch');
+        setIsLoading(false);
+        return;
+      }
+      
+      pendingRequest.current = true;
       setIsLoading(true);
+      
       try {
         await fetchData();
+        // Mark data as fetched
+        dataFetched.current = true;
       } catch (error) {
         console.error('Error refreshing data:', error);
       } finally {
         setIsLoading(false);
+        pendingRequest.current = false;
       }
     };
     

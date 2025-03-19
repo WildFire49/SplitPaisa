@@ -13,7 +13,7 @@ import { CreditCard, Users, IndianRupee, Tag, FileText } from 'lucide-react';
 
 const ExpenseForm = ({ tripId }) => {
   const router = useRouter();
-  const { friends, trips, addExpense, getTripById } = useExpenseStore();
+  const { friends, trips, addExpense, getTripById, refreshDataOnce } = useExpenseStore();
   
   const [formData, setFormData] = useState({
     description: '',
@@ -153,7 +153,7 @@ const ExpenseForm = ({ tripId }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!validateForm()) {
@@ -169,7 +169,10 @@ const ExpenseForm = ({ tripId }) => {
     
     console.log("Submitting expense data:", expenseData);
     
-    addExpense(expenseData);
+    await addExpense(expenseData);
+    
+    // Refresh data once after adding an expense
+    refreshDataOnce();
     
     if (tripId) {
       router.push(`/trips/${tripId}`);

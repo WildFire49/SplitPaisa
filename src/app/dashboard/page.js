@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { FaArrowRight, FaUserFriends } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
@@ -13,9 +13,12 @@ function DashboardContent() {
   const [balances, setBalances] = useState({});
   const [settlements, setSettlements] = useState([]);
   const [totalAmount, setTotalAmount] = useState(0);
+  
+  // Track if data has been processed to prevent duplicate calculations
+  const dataProcessed = useRef(false);
 
   useEffect(() => {
-    if (!loading && expenses.length > 0) {
+    if (!loading && expenses.length > 0 && !dataProcessed.current) {
       // Calculate balances and settlements
       const calculatedBalances = calculateBalances();
       setBalances(calculatedBalances);
@@ -26,6 +29,9 @@ function DashboardContent() {
       // Calculate total expenses
       const total = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
       setTotalAmount(total);
+      
+      // Mark data as processed
+      dataProcessed.current = true;
     }
   }, [expenses, calculateBalances, calculateSettlements, loading]);
 

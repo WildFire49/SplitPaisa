@@ -26,7 +26,7 @@ const Header = () => {
     <header className="bg-white dark:bg-gray-900 shadow-md">
       <div className="container mx-auto px-4 py-3">
         <div className="flex justify-between items-center">
-          <Link href="/" className="flex items-center">
+          <Link href="/" className="flex items-center" legacyBehavior={false}>
             <motion.div
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -43,11 +43,12 @@ const Header = () => {
               <Link 
                 key={item.path} 
                 href={item.path}
-                className={`flex items-center space-x-1 py-2 ${
+                className={`flex items-center space-x-1 py-2 relative ${
                   pathname === item.path
                     ? 'text-primary font-medium'
                     : 'text-gray-600 dark:text-gray-300 hover:text-primary dark:hover:text-primary'
                 }`}
+                legacyBehavior={false}
               >
                 <span className="text-lg">{item.icon}</span>
                 <span>{item.name}</span>
@@ -112,6 +113,7 @@ const Header = () => {
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                   onClick={() => setIsMenuOpen(false)}
+                  legacyBehavior={false}
                 >
                   <span className="text-lg">{item.icon}</span>
                   <span>{item.name}</span>

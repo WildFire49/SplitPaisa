@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -22,17 +22,123 @@ export function ExpenseProvider({ children }) {
   const [expenseParticipants, setExpenseParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Request tracking to prevent duplicate API calls
+  const pendingRequests = useRef({});
+  const dataFetched = useRef(false);
+
+  // Abort controller registry
+  const abortControllers = useRef({});
+  
+  // Create a new abort controller and register it
+  const createAbortController = (requestId) => {
+    // Cancel any existing request with the same ID
+    if (abortControllers.current[requestId]) {
+      abortControllers.current[requestId].abort();
+    }
+    
+    // Create a new controller
+    const controller = new AbortController();
+    abortControllers.current[requestId] = controller;
+    return controller;
+  };
+
+  // Helper function to fetch an expense with its participants
+  const fetchExpenseWithParticipants = useCallback(async (expenseId) => {
+    // Prevent duplicate calls
+    const requestId = `fetchExpense_${expenseId}`;
+    if (pendingRequests.current[requestId]) {
+      console.log(`Fetch expense ${expenseId} already in progress, skipping duplicate call`);
+      return;
+    }
+    
+    pendingRequests.current[requestId] = true;
+    
+    // Create abort controller
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
+    try {
+      // Fetch the expense first
+      const { data: expenseData, error: expenseError } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('id', expenseId)
+        .single()
+        .abortSignal(signal);
+      
+      if (expenseError) throw expenseError;
+      
+      // Fetch the participants for this expense
+      const { data: participantsData, error: participantsError } = await supabase
+        .from('expense_participants')
+        .select('*')
+        .eq('expense_id', expenseId)
+        .abortSignal(signal);
+      
+      if (participantsError) throw participantsError;
+      
+      if (!signal.aborted) {
+        // Combine the data
+        const expenseWithParticipants = {
+          ...expenseData,
+          expense_participants: participantsData || []
+        };
+        
+        // Update the state
+        setExpenses(prev => {
+          const exists = prev.some(exp => exp.id === expenseId);
+          if (exists) {
+            return prev.map(exp => exp.id === expenseId ? expenseWithParticipants : exp);
+          } else {
+            return [expenseWithParticipants, ...prev];
+          }
+        });
+      }
+    } catch (err) {
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error fetching expense with participants:', err.message || JSON.stringify(err));
+      }
+    } finally {
+      // Clean up
+      if (!signal.aborted) {
+        delete pendingRequests.current[requestId];
+      }
+    }
+  }, []);
 
   // Fetch data from Supabase on component mount
-  const fetchData = async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
+    // Prevent duplicate calls
+    if (pendingRequests.current.fetchData && !forceRefresh) {
+      console.log('Fetch data already in progress, skipping duplicate call');
+      return;
+    }
+    
+    // Skip if data is already fetched and no force refresh
+    if (dataFetched.current && !forceRefresh) {
+      console.log('Data already fetched, skipping fetch');
+      return;
+    }
+    
+    const requestId = 'fetchData';
+    pendingRequests.current[requestId] = true;
+    
+    // Create abort controller
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     setLoading(true);
     setError(null);
+    
     try {
       // Fetch trips
       const { data: tripsData, error: tripsError } = await supabase
         .from('trips')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
       
       if (tripsError) {
         console.error('Error fetching trips:', tripsError);
@@ -45,7 +151,8 @@ export function ExpenseProvider({ children }) {
       const { data: expensesData, error: expensesError } = await supabase
         .from('expenses')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
       
       if (expensesError) {
         console.error('Error fetching expenses:', expensesError);
@@ -57,7 +164,8 @@ export function ExpenseProvider({ children }) {
       // Fetch expense participants
       const { data: participantsData, error: participantsError } = await supabase
         .from('expense_participants')
-        .select('*');
+        .select('*')
+        .abortSignal(signal);
       
       if (participantsError) {
         console.error('Error fetching expense participants:', participantsError);
@@ -69,14 +177,15 @@ export function ExpenseProvider({ children }) {
       // Fetch users
       const { data: usersData, error: usersError } = await supabase
         .from('users')
-        .select('*');
+        .select('*')
+        .abortSignal(signal);
       
       if (usersError) {
         console.error('Error fetching users:', usersError);
       } else if (usersData && usersData.length > 0) {
         // Use users from database
         setFriends(usersData);
-      } else {
+      } else if (!signal.aborted) {
         // No users in database, add initial friends
         console.log('No users found in database, adding initial friends');
         
@@ -84,7 +193,8 @@ export function ExpenseProvider({ children }) {
         for (const friend of initialFriends) {
           const { error } = await supabase
             .from('users')
-            .insert([friend]);
+            .insert([friend])
+            .abortSignal(signal);
           
           if (error) {
             console.error('Error adding initial friend:', error);
@@ -94,15 +204,26 @@ export function ExpenseProvider({ children }) {
         // Set friends to initialFriends
         setFriends(initialFriends);
       }
+      
+      // Mark data as fetched
+      dataFetched.current = true;
     } catch (err) {
-      console.error('Error fetching data:', err.message || JSON.stringify(err));
-      setError('Failed to fetch data. Please try again.');
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error fetching data:', err.message || JSON.stringify(err));
+        setError('Failed to fetch data. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      // Only update loading state if not aborted
+      if (!signal.aborted) {
+        setLoading(false);
+        delete pendingRequests.current[requestId];
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
+    // Fetch data on mount
     fetchData();
     
     // Set up real-time subscriptions
@@ -131,54 +252,27 @@ export function ExpenseProvider({ children }) {
       })
       .subscribe();
     
+    // Capture the current controllers for cleanup
+    const currentControllers = abortControllers.current;
+    
     return () => {
+      // Clean up subscriptions
       tripsSubscription.unsubscribe();
       expensesSubscription.unsubscribe();
-    };
-  }, []);
-
-  // Helper function to fetch an expense with its participants
-  const fetchExpenseWithParticipants = async (expenseId) => {
-    try {
-      // Fetch the expense first
-      const { data: expenseData, error: expenseError } = await supabase
-        .from('expenses')
-        .select('*')
-        .eq('id', expenseId)
-        .single();
       
-      if (expenseError) throw expenseError;
-      
-      // Fetch the participants for this expense
-      const { data: participantsData, error: participantsError } = await supabase
-        .from('expense_participants')
-        .select('*')
-        .eq('expense_id', expenseId);
-      
-      if (participantsError) throw participantsError;
-      
-      // Combine the data
-      const expenseWithParticipants = {
-        ...expenseData,
-        expense_participants: participantsData || []
-      };
-      
-      // Update the state
-      setExpenses(prev => {
-        const exists = prev.some(exp => exp.id === expenseId);
-        if (exists) {
-          return prev.map(exp => exp.id === expenseId ? expenseWithParticipants : exp);
-        } else {
-          return [expenseWithParticipants, ...prev];
-        }
+      // Abort all pending requests
+      Object.values(currentControllers).forEach(controller => {
+        controller.abort();
       });
-    } catch (err) {
-      console.error('Error fetching expense with participants:', err.message || JSON.stringify(err));
-    }
-  };
+    };
+  }, [fetchData, fetchExpenseWithParticipants]);
 
   // Add a new trip
-  const addTrip = async (trip) => {
+  const addTrip = useCallback(async (trip) => {
+    const requestId = 'addTrip';
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       // Create trip object without members
       const { members, ...tripData } = trip;
@@ -194,7 +288,8 @@ export function ExpenseProvider({ children }) {
       const { data, error } = await supabase
         .from('trips')
         .insert([newTrip])
-        .select();
+        .select()
+        .abortSignal(signal);
       
       if (error) {
         console.error('Error inserting trip:', error);
@@ -204,7 +299,7 @@ export function ExpenseProvider({ children }) {
       const tripId = data[0].id;
       
       // If members are provided, create trip_members records
-      if (members && members.length > 0) {
+      if (members && members.length > 0 && !signal.aborted) {
         const tripMembers = members.map(userId => ({
           id: uuidv4(),
           trip_id: tripId,
@@ -215,7 +310,8 @@ export function ExpenseProvider({ children }) {
         
         const { error: membersError } = await supabase
           .from('trip_members')
-          .insert(tripMembers);
+          .insert(tripMembers)
+          .abortSignal(signal);
         
         if (membersError) {
           console.error('Error inserting trip members:', membersError);
@@ -225,14 +321,23 @@ export function ExpenseProvider({ children }) {
       
       return tripId;
     } catch (err) {
-      console.error('Error adding trip:', err.message || JSON.stringify(err));
-      setError('Failed to add trip. Please try again.');
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error adding trip:', err.message || JSON.stringify(err));
+        setError('Failed to add trip. Please try again.');
+      }
       return null;
+    } finally {
+      delete pendingRequests.current[requestId];
     }
-  };
+  }, []);
 
   // Add a new expense
-  const addExpense = async (expense) => {
+  const addExpense = useCallback(async (expense) => {
+    const requestId = 'addExpense';
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       const expenseId = uuidv4();
       
@@ -250,42 +355,55 @@ export function ExpenseProvider({ children }) {
       
       const { error: expenseError } = await supabase
         .from('expenses')
-        .insert([newExpense]);
+        .insert([newExpense])
+        .abortSignal(signal);
       
       if (expenseError) {
         console.error('Error inserting expense:', expenseError);
         throw expenseError;
       }
       
-      // Create expense participants
-      const participants = expense.participants.map(participantId => ({
-        id: uuidv4(),
-        expense_id: expenseId,
-        user_id: participantId,
-        share: expense.amount / expense.participants.length
-      }));
-      
-      console.log("Adding expense participants:", participants);
-      
-      const { error: participantsError } = await supabase
-        .from('expense_participants')
-        .insert(participants);
-      
-      if (participantsError) {
-        console.error('Error inserting expense participants:', participantsError);
-        throw participantsError;
+      if (!signal.aborted) {
+        // Create expense participants
+        const participants = expense.participants.map(participantId => ({
+          id: uuidv4(),
+          expense_id: expenseId,
+          user_id: participantId,
+          share: expense.amount / expense.participants.length
+        }));
+        
+        console.log("Adding expense participants:", participants);
+        
+        const { error: participantsError } = await supabase
+          .from('expense_participants')
+          .insert(participants)
+          .abortSignal(signal);
+        
+        if (participantsError) {
+          console.error('Error inserting expense participants:', participantsError);
+          throw participantsError;
+        }
       }
       
       return expenseId;
     } catch (err) {
-      console.error('Error adding expense:', err.message || JSON.stringify(err));
-      setError('Failed to add expense. Please try again.');
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error adding expense:', err.message || JSON.stringify(err));
+        setError('Failed to add expense. Please try again.');
+      }
       return null;
+    } finally {
+      delete pendingRequests.current[requestId];
     }
-  };
+  }, []);
 
   // Add a new user
-  const addUser = async (name) => {
+  const addUser = useCallback(async (name) => {
+    const requestId = 'addUser';
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       const userId = uuidv4();
       
@@ -299,26 +417,34 @@ export function ExpenseProvider({ children }) {
       
       const { error } = await supabase
         .from('users')
-        .insert([newUser]);
+        .insert([newUser])
+        .abortSignal(signal);
       
       if (error) {
         console.error('Error adding user:', error);
         throw error;
       }
       
-      // Update local friends list
-      setFriends(prev => [...prev, newUser]);
+      if (!signal.aborted) {
+        // Update local friends list
+        setFriends(prev => [...prev, newUser]);
+      }
       
       return userId;
     } catch (err) {
-      console.error('Error adding user:', err.message || JSON.stringify(err));
-      setError('Failed to add user. Please try again.');
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error adding user:', err.message || JSON.stringify(err));
+        setError('Failed to add user. Please try again.');
+      }
       return null;
+    } finally {
+      delete pendingRequests.current[requestId];
     }
-  };
+  }, []);
 
   // Calculate balances between friends
-  const calculateBalances = () => {
+  const calculateBalances = useCallback(() => {
     const balances = {};
     
     // Initialize balances for all friends
@@ -348,10 +474,10 @@ export function ExpenseProvider({ children }) {
     });
 
     return balances;
-  };
+  }, [friends, expenses, expenseParticipants]);
 
   // Calculate who owes whom
-  const calculateSettlements = () => {
+  const calculateSettlements = useCallback(() => {
     try {
       const balances = calculateBalances();
       const settlements = [];
@@ -403,10 +529,23 @@ export function ExpenseProvider({ children }) {
       console.error('Error calculating settlements:', error);
       return [];
     }
-  };
+  }, [calculateBalances]);
 
   // Get a trip by ID
-  const getTripById = async (tripId) => {
+  const getTripById = useCallback(async (tripId) => {
+    // Prevent duplicate calls
+    const requestId = `getTripById_${tripId}`;
+    if (pendingRequests.current[requestId]) {
+      console.log(`Get trip ${tripId} already in progress, skipping duplicate call`);
+      return null;
+    }
+    
+    pendingRequests.current[requestId] = true;
+    
+    // Create abort controller
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       // Validate that tripId exists
       if (!tripId) {
@@ -421,7 +560,8 @@ export function ExpenseProvider({ children }) {
         .from("trips")
         .select("*")
         .eq("id", tripId)
-        .single();
+        .single()
+        .abortSignal(signal);
       
       if (tripError) {
         console.error("Error getting trip by ID:", tripError.message);
@@ -433,16 +573,21 @@ export function ExpenseProvider({ children }) {
         return null;
       }
       
+      if (signal.aborted) return null;
+      
       // Next, get the trip members
       const { data: memberData, error: memberError } = await supabase
         .from("trip_members")
         .select("user_id")
-        .eq("trip_id", tripId);
+        .eq("trip_id", tripId)
+        .abortSignal(signal);
       
       if (memberError) {
         console.error("Error getting trip members:", memberError.message);
         // Continue without members
       }
+      
+      if (signal.aborted) return null;
       
       // Add members to trip data if available
       if (memberData && memberData.length > 0) {
@@ -453,25 +598,49 @@ export function ExpenseProvider({ children }) {
       
       return tripData;
     } catch (error) {
-      console.error("Error fetching trip by ID:", error);
+      // Only log error if not aborted
+      if (error.name !== 'AbortError') {
+        console.error("Error fetching trip by ID:", error);
+      }
       return null;
+    } finally {
+      // Clean up
+      if (!signal.aborted) {
+        delete pendingRequests.current[requestId];
+      }
     }
-  };
+  }, []);
 
   // Get expenses for a specific trip
-  const getExpensesByTrip = async (tripId) => {
+  const getExpensesByTrip = useCallback(async (tripId) => {
+    // Prevent duplicate calls
+    const requestId = `getExpensesByTrip_${tripId}`;
+    if (pendingRequests.current[requestId]) {
+      console.log(`Get expenses for trip ${tripId} already in progress, skipping duplicate call`);
+      return [];
+    }
+    
+    pendingRequests.current[requestId] = true;
+    
+    // Create abort controller
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       // Fetch expenses for the trip
       const { data: expensesData, error: expensesError } = await supabase
         .from('expenses')
         .select('*')
         .eq('trip_id', tripId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .abortSignal(signal);
       
       if (expensesError) {
         console.error('Error fetching expenses by trip ID:', expensesError);
         throw expensesError;
       }
+      
+      if (signal.aborted) return [];
       
       // Fetch participants for these expenses
       const expenseIds = expensesData.map(e => e.id);
@@ -482,12 +651,15 @@ export function ExpenseProvider({ children }) {
       const { data: participantsData, error: participantsError } = await supabase
         .from('expense_participants')
         .select('*')
-        .in('expense_id', expenseIds);
+        .in('expense_id', expenseIds)
+        .abortSignal(signal);
       
       if (participantsError) {
         console.error('Error fetching expense participants:', participantsError);
         throw participantsError;
       }
+      
+      if (signal.aborted) return [];
       
       // Join expenses with their participants
       const expensesWithParticipants = expensesData.map(expense => ({
@@ -497,47 +669,68 @@ export function ExpenseProvider({ children }) {
       
       return expensesWithParticipants;
     } catch (err) {
-      console.error('Error getting expenses by trip:', err.message || JSON.stringify(err));
-      setError(`Failed to load expenses for trip ID: ${tripId}`);
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error getting expenses by trip:', err.message || JSON.stringify(err));
+        setError(`Failed to load expenses for trip ID: ${tripId}`);
+      }
       return [];
+    } finally {
+      // Clean up
+      if (!signal.aborted) {
+        delete pendingRequests.current[requestId];
+      }
     }
-  };
+  }, []);
 
   // Delete a trip
-  const deleteTrip = async (tripId) => {
+  const deleteTrip = useCallback(async (tripId) => {
+    const requestId = `deleteTrip_${tripId}`;
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       // First, get all expenses for this trip
       const tripExpenses = await getExpensesByTrip(tripId);
+      
+      if (signal.aborted) return;
       
       // Delete all expense participants for each expense
       for (const expense of tripExpenses) {
         const { error: participantsError } = await supabase
           .from('expense_participants')
           .delete()
-          .eq('expense_id', expense.id);
+          .eq('expense_id', expense.id)
+          .abortSignal(signal);
         
         if (participantsError) {
           console.error('Error deleting expense participants:', participantsError);
           throw participantsError;
         }
+        
+        if (signal.aborted) return;
       }
       
       // Delete all expenses for this trip
       const { error: expensesError } = await supabase
         .from('expenses')
         .delete()
-        .eq('trip_id', tripId);
+        .eq('trip_id', tripId)
+        .abortSignal(signal);
       
       if (expensesError) {
         console.error('Error deleting trip expenses:', expensesError);
         throw expensesError;
       }
       
+      if (signal.aborted) return;
+      
       // Finally, delete the trip itself
       const { error: tripError } = await supabase
         .from('trips')
         .delete()
-        .eq('id', tripId);
+        .eq('id', tripId)
+        .abortSignal(signal);
       
       if (tripError) {
         console.error('Error deleting trip:', tripError);
@@ -546,31 +739,44 @@ export function ExpenseProvider({ children }) {
       
       // No need to update state as the real-time subscription will handle it
     } catch (err) {
-      console.error('Error deleting trip:', err.message || JSON.stringify(err));
-      setError('Failed to delete trip. Please try again.');
-      throw err;
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error deleting trip:', err.message || JSON.stringify(err));
+        setError('Failed to delete trip. Please try again.');
+        throw err;
+      }
+    } finally {
+      delete pendingRequests.current[requestId];
     }
-  };
+  }, [getExpensesByTrip]);
 
   // Delete an expense
-  const deleteExpense = async (expenseId) => {
+  const deleteExpense = useCallback(async (expenseId) => {
+    const requestId = `deleteExpense_${expenseId}`;
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
     try {
       // First delete all participants for this expense
       const { error: participantsError } = await supabase
         .from('expense_participants')
         .delete()
-        .eq('expense_id', expenseId);
+        .eq('expense_id', expenseId)
+        .abortSignal(signal);
       
       if (participantsError) {
         console.error('Error deleting expense participants:', participantsError);
         throw participantsError;
       }
       
+      if (signal.aborted) return;
+      
       // Then delete the expense itself
       const { error: expenseError } = await supabase
         .from('expenses')
         .delete()
-        .eq('id', expenseId);
+        .eq('id', expenseId)
+        .abortSignal(signal);
       
       if (expenseError) {
         console.error('Error deleting expense:', expenseError);
@@ -579,16 +785,31 @@ export function ExpenseProvider({ children }) {
       
       // No need to update state as the real-time subscription will handle it
     } catch (err) {
-      console.error('Error deleting expense:', err.message || JSON.stringify(err));
-      setError('Failed to delete expense. Please try again.');
-      throw err;
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error deleting expense:', err.message || JSON.stringify(err));
+        setError('Failed to delete expense. Please try again.');
+        throw err;
+      }
+    } finally {
+      delete pendingRequests.current[requestId];
     }
-  };
+  }, []);
 
   // Get a friend by ID
-  const getFriendById = (friendId) => {
+  const getFriendById = useCallback((friendId) => {
     return friends.find(friend => friend.id === friendId);
-  };
+  }, [friends]);
+
+  // Refresh data once
+  const refreshDataOnce = useCallback(() => {
+    // Reset the dataFetched flag to force a refresh
+    dataFetched.current = false;
+    // Then fetch data
+    fetchData(true);
+    // Set dataFetched back to true to prevent further refreshes
+    dataFetched.current = true;
+  }, [fetchData]);
 
   // Context value
   const contextValue = {
@@ -608,7 +829,8 @@ export function ExpenseProvider({ children }) {
     calculateBalances,
     calculateSettlements,
     addUser,
-    fetchData
+    fetchData,
+    refreshDataOnce
   };
 
   return (
