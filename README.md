@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# SplitRupee - Expense Sharing App
+
+SplitRupee is a beautiful expense sharing application built with Next.js that helps you manage and settle expenses among friends. It's perfect for trips, roommates, or any group that needs to track shared expenses.
+
+![SplitRupee App](https://via.placeholder.com/800x400?text=SplitRupee+App)
+
+## Features
+
+- **Trip Management**: Create and manage trips with your friends
+- **Expense Tracking**: Add expenses and split them among participants
+- **Smart Settlements**: Automatically calculates the optimal way to settle debts
+- **Beautiful UI**: Modern interface with animations and responsive design
+- **Local Storage**: All data is stored locally in your browser
 
 ## Getting Started
 
 First, run the development server:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the app.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## How to Use
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Creating a Trip
 
-## Learn More
+1. Click on "Create New Trip" on the homepage or navigate to the "Add Trip" page
+2. Fill in the trip details (name, description, date)
+3. Submit the form to create your trip
 
-To learn more about Next.js, take a look at the following resources:
+### Adding Expenses
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Navigate to a trip and click "Add Expense" or go to the "Add Expense" page
+2. Enter the expense details:
+   - Description
+   - Amount (in ₹)
+   - Who paid
+   - Split between which friends
+   - Date
+3. Submit the form to add the expense
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Viewing Settlements
 
-## Deploy on Vercel
+1. Go to the "Dashboard" page to see a summary of all balances
+2. The app will show who owes whom and the optimal way to settle all debts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Sharing a Trip
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Navigate to a trip's details page
+2. Click the "Share Trip" button to copy the URL
+3. Share the URL with your friends so they can view and add expenses to the trip
+
+## Tech Stack
+
+- **Frontend**: Next.js, React, Tailwind CSS
+- **State Management**: React Context API
+- **Animations**: Framer Motion
+- **Icons**: React Icons
+- **Storage**: Browser's localStorage
+
+## Customization
+
+You can customize the app by modifying the following files:
+
+- `src/app/globals.css`: Update the color scheme and styling variables
+- `src/store/expenseStore.js`: Modify the initial friends list or add more functionality
+- `src/components/ui/`: Customize UI components
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
+
+## Acknowledgements
+
+- Built with [Next.js](https://nextjs.org)
+- Inspired by [Splitwise](https://www.splitwise.com/)
