@@ -1,56 +1,121 @@
-'use client';
+"use client";
 
-import { useEffect, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import ExpenseForm from '@/components/forms/ExpenseForm';
-import { useExpenseStore } from '@/store/expenseStore';
-import Card from '@/components/ui/Card';
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import ExpenseForm from "@/components/forms/ExpenseForm";
+import { useExpenseStore } from "@/store/expenseStore";
+import Card from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
+import Link from "next/link";
 
-// Client component that uses useSearchParams
+// Client component that uses URL search params
 function ExpensePageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [tripId, setTripId] = useState(null);
-  const { getTripById } = useExpenseStore();
-  const [tripName, setTripName] = useState('');
+  const { getTripById, loading, error } = useExpenseStore();
+  const [tripName, setTripName] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
-    const tripIdParam = searchParams.get('tripId');
-    if (tripIdParam) {
-      const id = parseInt(tripIdParam);
-      setTripId(id);
-      
-      const trip = getTripById(id);
-      if (trip) {
-        setTripName(trip.name);
+    const fetchTripData = async () => {
+      setIsLoading(true);
+      try {
+        // Get the trip ID from search params
+        const rawTripId = searchParams.get("tripId");
+        
+        // Only proceed if we have a valid string ID
+        if (rawTripId) {
+          setTripId(rawTripId);
+          
+          console.log("Fetching trip with ID:", rawTripId);
+          const trip = await getTripById(rawTripId);
+          
+          if (trip) {
+            setTripName(trip.name);
+            setLoadError(null);
+          } else {
+            console.error("Trip not found for ID:", rawTripId);
+            setLoadError("Trip not found");
+          }
+        } else {
+          // No trip ID in URL, this is a new expense without a trip
+          setLoadError(null);
+        }
+      } catch (err) {
+        console.error("Error loading trip data:", err);
+        setLoadError("Failed to load trip data. Please try again.");
+      } finally {
+        setIsLoading(false);
       }
+    };
+
+    if (!loading) {
+      fetchTripData();
     }
-  }, [searchParams, getTripById]);
+  }, [getTripById, loading, searchParams]);
+
+  if (loading || isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (error || loadError) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Card className="p-6 max-w-md w-full">
+          <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
+          <p className="text-gray-700">{error || loadError}</p>
+          <div className="mt-4">
+            <Link href="/trips">
+              <Button>Back to Trips</Button>
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <h1 className="text-3xl font-bold mb-8 text-center">
-        {tripName ? `Add Expense to ${tripName}` : 'Add New Expense'}
-      </h1>
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Add New Expense</h1>
+          {tripName && (
+            <p className="text-gray-500">For trip: {tripName}</p>
+          )}
+        </div>
+        
+        <Link href={tripId ? `/trips/${tripId}` : "/trips"}>
+          <Button variant="secondary">Cancel</Button>
+        </Link>
+      </div>
+      
       <ExpenseForm tripId={tripId} />
-    </>
+    </div>
   );
 }
 
 // Loading fallback component
 function ExpensePageLoading() {
   return (
-    <Card className="max-w-md mx-auto p-6 text-center" elevation="medium">
-      <p>Loading expense form...</p>
-    </Card>
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    </div>
   );
 }
 
-export default function NewExpensePage() {
+// Main page component with Suspense
+export default function ExpensePage() {
   return (
-    <div className="max-w-4xl mx-auto">
-      <Suspense fallback={<ExpensePageLoading />}>
-        <ExpensePageContent />
-      </Suspense>
-    </div>
+    <Suspense fallback={<ExpensePageLoading />}>
+      <ExpensePageContent />
+    </Suspense>
   );
 }

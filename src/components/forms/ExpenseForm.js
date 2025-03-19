@@ -287,6 +287,7 @@ const ExpenseForm = ({ tripId }) => {
           <Button 
             type="submit"
             elevation="high"
+            
           >
             Add Expense
           </Button>

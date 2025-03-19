@@ -1,20 +1,22 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck } from 'react-icons/fa';
-import { useExpenseStore } from '@/store/expenseStore';
-import Card from '@/components/ui/Card';
-import Button from '@/components/ui/Button';
-import { ArrowRight, IndianRupee } from 'lucide-react';
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck } from "react-icons/fa";
+import { useExpenseStore } from "@/store/expenseStore";
+import Card from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
+import { ArrowRight, IndianRupee } from "lucide-react";
 
 // Client component that uses useParams
 function TripDetailsContent() {
   const params = useParams();
   const router = useRouter();
-  const tripId = parseInt(params.id);
+  
+  // Extract and parse the ID properly
+  const tripId = params?.id || null;
   
   const { 
     getTripById, 
@@ -23,8 +25,8 @@ function TripDetailsContent() {
     deleteTrip,
     deleteExpense,
     friends,
-    calculateBalances,
-    calculateSettlements
+    loading,
+    error
   } = useExpenseStore();
   
   const [trip, setTrip] = useState(null);
@@ -33,6 +35,8 @@ function TripDetailsContent() {
   const [tripBalances, setTripBalances] = useState({});
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Calculate settlements specific to this trip
   const calculateTripSettlements = useCallback((tripExpenses) => {
@@ -45,13 +49,12 @@ function TripDetailsContent() {
     // Calculate net balance for each friend based on trip expenses only
     tripExpenses.forEach(expense => {
       // Add amount to payer's balance (they are owed this money)
-      balances[expense.paidBy] += expense.amount;
+      balances[expense.paid_by] += parseFloat(expense.amount);
       
       // Distribute expense among participants
-      const splitAmount = expense.amount / expense.participants.length;
-      expense.participants.forEach(participantId => {
-        // Subtract split amount from each participant's balance (they owe this money)
-        balances[participantId] -= splitAmount;
+      expense.expense_participants.forEach(participant => {
+        // Subtract share amount from each participant's balance (they owe this money)
+        balances[participant.user_id] -= parseFloat(participant.share);
       });
     });
 
@@ -63,12 +66,12 @@ function TripDetailsContent() {
     // Create arrays of creditors (positive balance) and debtors (negative balance)
     const creditors = Object.entries(balances)
       .filter(([_, balance]) => balance > 0)
-      .map(([id, balance]) => ({ id: parseInt(id), balance }))
+      .map(([id, balance]) => ({ id, balance }))
       .sort((a, b) => b.balance - a.balance);
 
     const debtors = Object.entries(balances)
       .filter(([_, balance]) => balance < 0)
-      .map(([id, balance]) => ({ id: parseInt(id), balance: Math.abs(balance) }))
+      .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
       .sort((a, b) => b.balance - a.balance);
 
     // Match debtors with creditors to settle debts
@@ -101,22 +104,47 @@ function TripDetailsContent() {
   }, [friends]);
 
   useEffect(() => {
-    const tripData = getTripById(tripId);
-    if (!tripData) {
-      router.push('/trips');
-      return;
+    const fetchTripData = async () => {
+      setIsLoading(true);
+      try {
+        // Skip fetching if tripId is not available or invalid
+        if (!tripId) {
+          console.error("Invalid trip ID:", params);
+          setLoadError("Invalid trip ID");
+          return;
+        }
+        
+        console.log("Fetching trip with ID:", tripId);
+        const tripData = await getTripById(tripId);
+        
+        if (!tripData) {
+          console.error("Trip not found for ID:", tripId);
+          setLoadError("Trip not found");
+          return;
+        }
+        
+        const tripExpenses = await getExpensesByTrip(tripId);
+        setTrip(tripData);
+        setExpenses(tripExpenses);
+        
+        // Calculate trip-specific balances and settlements
+        calculateTripSettlements(tripExpenses);
+        setLoadError(null);
+      } catch (err) {
+        console.error("Error loading trip details:", err);
+        setLoadError("Failed to load trip details. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (!loading && tripId) {
+      fetchTripData();
     }
-    
-    const tripExpenses = getExpensesByTrip(tripId);
-    setTrip(tripData);
-    setExpenses(tripExpenses);
-    
-    // Calculate trip-specific balances and settlements
-    calculateTripSettlements(tripExpenses);
-  }, [tripId, getTripById, getExpensesByTrip, router, calculateTripSettlements]);
+  }, [tripId, getTripById, getExpensesByTrip, calculateTripSettlements, loading, params]);
 
   // Calculate total expenses for this trip
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalExpenses = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
 
   // Format currency
   const formatCurrency = (amount) => {
@@ -134,55 +162,83 @@ function TripDetailsContent() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDeleteTrip = () => {
+  const handleDeleteTrip = async () => {
     if (confirmDelete) {
-      deleteTrip(tripId);
-      router.push('/trips');
+      try {
+        await deleteTrip(tripId);
+        router.push('/trips');
+      } catch (err) {
+        console.error("Error deleting trip:", err);
+        setLoadError("Failed to delete trip. Please try again.");
+      }
     } else {
       setConfirmDelete(true);
       setTimeout(() => setConfirmDelete(false), 3000);
     }
   };
 
-  const handleDeleteExpense = (expenseId) => {
-    deleteExpense(expenseId);
-    const updatedExpenses = getExpensesByTrip(tripId);
-    setExpenses(updatedExpenses);
-    calculateTripSettlements(updatedExpenses);
+  const handleDeleteExpense = async (expenseId) => {
+    try {
+      await deleteExpense(expenseId);
+      // Refresh expenses
+      const updatedExpenses = await getExpensesByTrip(tripId);
+      setExpenses(updatedExpenses);
+      calculateTripSettlements(updatedExpenses);
+    } catch (err) {
+      console.error("Error deleting expense:", err);
+      setLoadError("Failed to delete expense. Please try again.");
+    }
   };
+
+  if (loading || isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (error || loadError) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Card className="p-6 max-w-md w-full">
+          <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
+          <p className="text-gray-700">{error || loadError}</p>
+        </Card>
+      </div>
+    );
+  }
 
   if (!trip) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <p>Loading trip details...</p>
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Card className="p-6 max-w-md w-full">
+          <h2 className="text-xl font-semibold mb-2">Trip Not Found</h2>
+          <p className="text-gray-700 mb-4">The trip you're looking for doesn't exist or has been deleted.</p>
+          <Link href="/trips">
+            <Button>Back to Trips</Button>
+          </Link>
+        </Card>
       </div>
     );
   }
 
   return (
     <div className="space-y-8">
+      {/* Trip Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{trip.name}</h1>
-          <p className="text-gray-600 dark:text-gray-300 mt-1">
-            {new Date(trip.date).toLocaleDateString('en-IN', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
+          <h1 className="text-3xl font-bold mb-2">{trip.name}</h1>
+          <p className="text-gray-500">
+            {new Date(trip.date || trip.created_at).toLocaleDateString("en-IN", {
+              year: "numeric",
+              month: "long",
+              day: "numeric"
             })}
           </p>
         </div>
         
-        <div className="flex flex-wrap gap-3">
-          <Button 
-            variant="outline" 
-            className="flex items-center gap-2"
-            onClick={handleShareTrip}
-          >
-            {copied ? <FaCheck /> : <FaShare />}
-            {copied ? 'Copied!' : 'Share Trip'}
-          </Button>
-          
+        <div className="flex flex-wrap gap-2">
           <Link href={`/expenses/new?tripId=${tripId}`}>
             <Button className="flex items-center gap-2">
               <FaPlus /> Add Expense
@@ -191,201 +247,157 @@ function TripDetailsContent() {
           
           <Button 
             variant="outline" 
-            className="flex items-center gap-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+            className="flex items-center gap-2"
+            onClick={handleShareTrip}
+          >
+            {copied ? <FaCheck /> : <FaShare />}
+            {copied ? "Copied!" : "Share"}
+          </Button>
+          
+          <Button 
+            variant="outline" 
+            className="flex items-center gap-2 text-error hover:bg-error hover:text-white"
             onClick={handleDeleteTrip}
           >
             <FaTrash />
-            {confirmDelete ? 'Confirm Delete' : 'Delete Trip'}
+            {confirmDelete ? "Confirm Delete" : "Delete Trip"}
           </Button>
         </div>
       </div>
       
-      {trip.description && (
-        <Card>
-          <h2 className="text-xl font-semibold mb-2">Description</h2>
-          <p>{trip.description}</p>
-        </Card>
-      )}
-      
+      {/* Trip Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="text-center p-6">
-          <div className="flex justify-center items-center mb-3">
-            <IndianRupee className="text-4xl text-primary" />
-          </div>
-          <h3 className="text-lg font-medium mb-2">Total Expenses</h3>
-          <p className="text-3xl font-bold">{formatCurrency(totalExpenses)}</p>
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <IndianRupee className="mr-2" size={20} />
+            Total Expenses
+          </h2>
+          <p className="text-3xl font-bold text-primary">
+            {formatCurrency(totalExpenses)}
+          </p>
         </Card>
         
-        <Card className="text-center p-6">
-          <h3 className="text-lg font-medium mb-2">Expenses Count</h3>
-          <p className="text-3xl font-bold">{expenses.length}</p>
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            Participants
+          </h2>
+          <p className="text-3xl font-bold text-primary">
+            {Object.keys(tripBalances).length}
+          </p>
         </Card>
         
-        <Card className="text-center p-6 cursor-pointer" onClick={handleShareTrip}>
-          <h3 className="text-lg font-medium mb-2">Share Trip</h3>
-          <div className="flex items-center justify-center gap-2 text-primary">
-            <FaClipboard className="text-xl" />
-            <span>Copy Link</span>
-          </div>
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg>
+            Expenses
+          </h2>
+          <p className="text-3xl font-bold text-primary">{expenses.length}</p>
         </Card>
       </div>
       
-      {/* Settlements Section */}
-      <div>
-        <h2 className="text-2xl font-bold mb-4">Settlements</h2>
+      {/* Expenses List */}
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Expenses</h2>
         
-        {tripSettlements.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {tripSettlements.map((settlement, index) => (
-              <Card key={index} className="p-4" elevation="medium">
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                  <div className="text-center sm:text-left">
-                    <p className="text-lg font-semibold">{getFriendById(settlement.from)?.name}</p>
-                    <p className="text-sm text-gray-500">pays</p>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <div className="text-xl font-bold text-primary flex items-center">
-                      <IndianRupee className="h-5 w-5 mr-1" />
-                      {settlement.amount.toFixed(2)}
+        {expenses.length > 0 ? (
+          <div className="space-y-4">
+            {expenses.map((expense) => (
+              <motion.div
+                key={expense.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <Card className="p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-semibold text-lg">{expense.description}</h3>
+                      <p className="text-sm text-gray-500">
+                        Paid by {getFriendById(expense.paid_by)?.name || "Unknown"} • 
+                        {new Date(expense.created_at).toLocaleDateString("en-IN", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric"
+                        })}
+                      </p>
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-600">
+                          Split among: {expense.expense_participants.map(p => 
+                            getFriendById(p.user_id)?.name || "Unknown"
+                          ).join(', ')}
+                        </p>
+                      </div>
                     </div>
-                    <ArrowRight className="mx-2 text-gray-400" />
+                    
+                    <div className="flex flex-col items-end">
+                      <span className="font-bold text-lg text-primary">
+                        {formatCurrency(expense.amount)}
+                      </span>
+                      <button 
+                        className="text-sm text-error mt-2 hover:underline"
+                        onClick={() => handleDeleteExpense(expense.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                  
-                  <div className="text-center sm:text-right">
-                    <p className="text-lg font-semibold">{getFriendById(settlement.to)?.name}</p>
-                    <p className="text-sm text-gray-500">receives</p>
-                  </div>
-                </div>
-              </Card>
+                </Card>
+              </motion.div>
             ))}
           </div>
         ) : (
-          <Card className="text-center p-8">
+          <Card className="p-6 text-center">
+            <p className="text-gray-500 mb-4">No expenses added yet</p>
+            <Link href={`/expenses/new?tripId=${tripId}`}>
+              <Button className="flex items-center gap-2 mx-auto">
+                <FaPlus /> Add First Expense
+              </Button>
+            </Link>
+          </Card>
+        )}
+      </section>
+      
+      {/* Settlements */}
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Settlements</h2>
+        
+        {tripSettlements.length > 0 ? (
+          <div className="space-y-4">
+            {tripSettlements.map((settlement, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <Card className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <span className="font-semibold">{getFriendById(settlement.from)?.name || "Unknown"}</span>
+                      <ArrowRight className="mx-3 text-primary" />
+                      <span className="font-semibold">{getFriendById(settlement.to)?.name || "Unknown"}</span>
+                    </div>
+                    <span className="font-bold">{formatCurrency(settlement.amount)}</span>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <Card className="p-6 text-center">
             <p className="text-gray-500">Everyone is settled up! No payments needed.</p>
           </Card>
         )}
-      </div>
-      
-      {/* Individual Balances */}
-      <div>
-        <h2 className="text-2xl font-bold mb-4">Individual Balances</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {friends.map(friend => {
-            const balance = tripBalances[friend.id] || 0;
-            const isPositive = balance > 0;
-            const isNegative = balance < 0;
-            
-            return (
-              <Card 
-                key={friend.id} 
-                className={`p-4 ${
-                  isPositive 
-                    ? 'border-l-4 border-success' 
-                    : isNegative 
-                      ? 'border-l-4 border-error' 
-                      : ''
-                }`}
-                elevation="medium"
-              >
-                <h3 className="font-semibold text-lg mb-2">{friend.name}</h3>
-                <div className={`text-xl font-bold flex items-center ${
-                  isPositive 
-                    ? 'lending' 
-                    : isNegative 
-                      ? 'borrowing' 
-                      : ''
-                }`}>
-                  <IndianRupee className="h-5 w-5 mr-1" />
-                  {Math.abs(balance).toFixed(2)}
-                </div>
-                <p className="text-sm text-gray-500 mt-1">
-                  {isPositive 
-                    ? 'will receive' 
-                    : isNegative 
-                      ? 'owes' 
-                      : 'settled up'}
-                </p>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-      
-      <div>
-        <h2 className="text-2xl font-bold mb-4">Expenses</h2>
-        
-        {expenses.length > 0 ? (
-          <Card>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4">Description</th>
-                    <th className="text-left py-3 px-4">Amount</th>
-                    <th className="text-left py-3 px-4">Paid By</th>
-                    <th className="text-left py-3 px-4">Split Between</th>
-                    <th className="text-left py-3 px-4">Date</th>
-                    <th className="text-left py-3 px-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.map(expense => (
-                    <motion.tr 
-                      key={expense.id} 
-                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      layout
-                    >
-                      <td className="py-3 px-4">{expense.description}</td>
-                      <td className="py-3 px-4 font-medium">
-                        <div className="flex items-center">
-                          <IndianRupee className="h-4 w-4 mr-1" />
-                          {expense.amount.toFixed(2)}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        {getFriendById(expense.paidBy)?.name}
-                      </td>
-                      <td className="py-3 px-4">
-                        {expense.participants.map(id => 
-                          getFriendById(id)?.name
-                        ).join(', ')}
-                      </td>
-                      <td className="py-3 px-4 text-gray-500">
-                        {new Date(expense.date).toLocaleDateString('en-IN')}
-                      </td>
-                      <td className="py-3 px-4">
-                        <button 
-                          onClick={() => handleDeleteExpense(expense.id)}
-                          className="text-red-500 hover:text-red-700"
-                          title="Delete expense"
-                        >
-                          <FaTrash />
-                        </button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        ) : (
-          <Card className="text-center p-8">
-            <p className="text-gray-500">No expenses yet. Add your first expense!</p>
-            <div className="mt-4">
-              <Link href={`/expenses/new?tripId=${tripId}`}>
-                <Button>
-                  <FaPlus className="mr-2" /> Add Expense
-                </Button>
-              </Link>
-            </div>
-          </Card>
-        )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -393,10 +405,10 @@ function TripDetailsContent() {
 // Loading fallback component
 function TripDetailsLoading() {
   return (
-    <div className="space-y-8">
-      <Card className="p-6 text-center" elevation="medium">
-        <p>Loading trip details...</p>
-      </Card>
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
     </div>
   );
 }

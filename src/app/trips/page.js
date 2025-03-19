@@ -10,16 +10,18 @@ import Button from '@/components/ui/Button';
 
 // Client component
 function TripsContent() {
-  const { trips } = useExpenseStore();
+  const { trips, loading, error } = useExpenseStore();
   const [sortedTrips, setSortedTrips] = useState([]);
 
   useEffect(() => {
-    // Sort trips by date (newest first)
-    const sorted = [...trips].sort((a, b) => 
-      new Date(b.createdAt) - new Date(a.createdAt)
-    );
-    setSortedTrips(sorted);
-  }, [trips]);
+    if (!loading && trips.length > 0) {
+      // Sort trips by date (newest first)
+      const sorted = [...trips].sort((a, b) => 
+        new Date(b.created_at) - new Date(a.created_at)
+      );
+      setSortedTrips(sorted);
+    }
+  }, [trips, loading]);
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
@@ -28,6 +30,25 @@ function TripsContent() {
       day: 'numeric'
     });
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Card className="p-6 max-w-md w-full">
+          <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
+          <p className="text-gray-700">{error}</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -47,7 +68,7 @@ function TripsContent() {
               key={trip.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 * (trip.id % 10) }}
+              transition={{ delay: 0.1 * (sortedTrips.indexOf(trip) % 10) }}
             >
               <Link href={`/trips/${trip.id}`}>
                 <Card className="h-full cursor-pointer hover:shadow-lg transition-shadow duration-300">
@@ -56,7 +77,7 @@ function TripsContent() {
                     
                     <div className="flex items-center text-gray-500 mb-4">
                       <FaCalendarAlt className="mr-2" />
-                      <span>{formatDate(trip.date)}</span>
+                      <span>{formatDate(trip.date || trip.created_at)}</span>
                     </div>
                     
                     {trip.description && (
@@ -92,10 +113,10 @@ function TripsContent() {
 // Loading fallback component
 function TripsLoading() {
   return (
-    <div className="space-y-8">
-      <Card className="p-6 text-center" elevation="medium">
-        <p>Loading trips...</p>
-      </Card>
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
     </div>
   );
 }
