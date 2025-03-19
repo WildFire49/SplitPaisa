@@ -6,10 +6,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Initial friends list - will be replaced with users from Supabase
 const initialFriends = [
-  { id: '1', name: 'Lakshay' },
-  { id: '2', name: 'Siddhu' },
-  { id: '3', name: 'Shubham' },
-  { id: '4', name: 'Vaishakh' }
+  { id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', name: 'Lakshay' },
+  { id: '550e8400-e29b-41d4-a716-446655440000', name: 'Siddhu' },
+  { id: 'b3ba141a-a776-4380-b97a-f53c45a9d978', name: 'Shubham' },
+  { id: 'c3d3b5a6-7e62-4a3c-9142-0e1c2d3a4b5c', name: 'Vaishakh' }
 ];
 
 // Create context
@@ -19,75 +19,90 @@ export function ExpenseProvider({ children }) {
   const [friends, setFriends] = useState(initialFriends);
   const [trips, setTrips] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [expenseParticipants, setExpenseParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Fetch data from Supabase on component mount
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        // Fetch trips with a single query
-        const { data: tripsData, error: tripsError } = await supabase
-          .from('trips')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        if (tripsError) {
-          console.error('Error fetching trips:', tripsError);
-          throw tripsError;
-        }
-        
-        // Fetch expenses with a simpler query first to debug
-        const { data: expensesData, error: expensesError } = await supabase
-          .from('expenses')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        if (expensesError) {
-          console.error('Error fetching expenses:', expensesError);
-          throw expensesError;
-        }
-        
-        // Fetch expense participants separately
-        const { data: participantsData, error: participantsError } = await supabase
-          .from('expense_participants')
-          .select('*');
-          
-        if (participantsError) {
-          console.error('Error fetching expense participants:', participantsError);
-          throw participantsError;
-        }
-        
-        // Manually join expenses with their participants
-        const expensesWithParticipants = expensesData.map(expense => ({
-          ...expense,
-          expense_participants: participantsData.filter(p => p.expense_id === expense.id) || []
-        }));
-        
-        // Fetch users
-        const { data: usersData, error: usersError } = await supabase
-          .from('users')
-          .select('*');
-        
-        if (usersError) {
-          console.error('Error fetching users:', usersError);
-          throw usersError;
-        }
-        
-        // Update state with fetched data
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch trips
+      const { data: tripsData, error: tripsError } = await supabase
+        .from('trips')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (tripsError) {
+        console.error('Error fetching trips:', tripsError);
+        setError('Error fetching trips');
+      } else {
         setTrips(tripsData || []);
-        setExpenses(expensesWithParticipants || []);
-        setFriends(usersData?.length > 0 ? usersData : initialFriends);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching data:', err.message || JSON.stringify(err));
-        setError('Failed to load data. Please try again later.');
-      } finally {
-        setLoading(false);
       }
-    };
+      
+      // Fetch expenses
+      const { data: expensesData, error: expensesError } = await supabase
+        .from('expenses')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (expensesError) {
+        console.error('Error fetching expenses:', expensesError);
+        setError('Error fetching expenses');
+      } else {
+        setExpenses(expensesData || []);
+      }
 
+      // Fetch expense participants
+      const { data: participantsData, error: participantsError } = await supabase
+        .from('expense_participants')
+        .select('*');
+      
+      if (participantsError) {
+        console.error('Error fetching expense participants:', participantsError);
+        setError('Error fetching expense participants');
+      } else {
+        setExpenseParticipants(participantsData || []);
+      }
+      
+      // Fetch users
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select('*');
+      
+      if (usersError) {
+        console.error('Error fetching users:', usersError);
+      } else if (usersData && usersData.length > 0) {
+        // Use users from database
+        setFriends(usersData);
+      } else {
+        // No users in database, add initial friends
+        console.log('No users found in database, adding initial friends');
+        
+        // Add each initial friend to the database
+        for (const friend of initialFriends) {
+          const { error } = await supabase
+            .from('users')
+            .insert([friend]);
+          
+          if (error) {
+            console.error('Error adding initial friend:', error);
+          }
+        }
+        
+        // Set friends to initialFriends
+        setFriends(initialFriends);
+      }
+    } catch (err) {
+      console.error('Error fetching data:', err.message || JSON.stringify(err));
+      setError('Failed to fetch data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
     
     // Set up real-time subscriptions
@@ -165,11 +180,16 @@ export function ExpenseProvider({ children }) {
   // Add a new trip
   const addTrip = async (trip) => {
     try {
+      // Create trip object without members
+      const { members, ...tripData } = trip;
+      
       const newTrip = {
         id: uuidv4(),
-        ...trip,
+        ...tripData,
         created_at: new Date().toISOString(),
       };
+      
+      console.log("Adding trip:", newTrip);
       
       const { data, error } = await supabase
         .from('trips')
@@ -181,7 +201,29 @@ export function ExpenseProvider({ children }) {
         throw error;
       }
       
-      return data[0].id;
+      const tripId = data[0].id;
+      
+      // If members are provided, create trip_members records
+      if (members && members.length > 0) {
+        const tripMembers = members.map(userId => ({
+          id: uuidv4(),
+          trip_id: tripId,
+          user_id: userId
+        }));
+        
+        console.log("Adding trip members:", tripMembers);
+        
+        const { error: membersError } = await supabase
+          .from('trip_members')
+          .insert(tripMembers);
+        
+        if (membersError) {
+          console.error('Error inserting trip members:', membersError);
+          // Don't throw error here, we'll still return the trip ID
+        }
+      }
+      
+      return tripId;
     } catch (err) {
       console.error('Error adding trip:', err.message || JSON.stringify(err));
       setError('Failed to add trip. Please try again.');
@@ -204,6 +246,8 @@ export function ExpenseProvider({ children }) {
         created_at: new Date().toISOString(),
       };
       
+      console.log("Adding expense with data:", newExpense);
+      
       const { error: expenseError } = await supabase
         .from('expenses')
         .insert([newExpense]);
@@ -220,6 +264,8 @@ export function ExpenseProvider({ children }) {
         user_id: participantId,
         share: expense.amount / expense.participants.length
       }));
+      
+      console.log("Adding expense participants:", participants);
       
       const { error: participantsError } = await supabase
         .from('expense_participants')
@@ -238,6 +284,39 @@ export function ExpenseProvider({ children }) {
     }
   };
 
+  // Add a new user
+  const addUser = async (name) => {
+    try {
+      const userId = uuidv4();
+      
+      const newUser = {
+        id: userId,
+        name: name,
+        created_at: new Date().toISOString()
+      };
+      
+      console.log("Adding user:", newUser);
+      
+      const { error } = await supabase
+        .from('users')
+        .insert([newUser]);
+      
+      if (error) {
+        console.error('Error adding user:', error);
+        throw error;
+      }
+      
+      // Update local friends list
+      setFriends(prev => [...prev, newUser]);
+      
+      return userId;
+    } catch (err) {
+      console.error('Error adding user:', err.message || JSON.stringify(err));
+      setError('Failed to add user. Please try again.');
+      return null;
+    }
+  };
+
   // Calculate balances between friends
   const calculateBalances = () => {
     const balances = {};
@@ -250,13 +329,22 @@ export function ExpenseProvider({ children }) {
     // Calculate net balance for each friend
     expenses.forEach(expense => {
       // Add amount to payer's balance (they are owed this money)
-      balances[expense.paid_by] += parseFloat(expense.amount);
+      if (expense.paid_by) {
+        balances[expense.paid_by] = (balances[expense.paid_by] || 0) + parseFloat(expense.amount);
+      }
+      
+      // Find participants for this expense
+      const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
       
       // Distribute expense among participants
-      expense.expense_participants.forEach(participant => {
-        // Subtract share amount from each participant's balance (they owe this money)
-        balances[participant.user_id] -= parseFloat(participant.share);
-      });
+      if (participants && participants.length > 0) {
+        participants.forEach(participant => {
+          // Subtract share amount from each participant's balance (they owe this money)
+          if (participant.user_id) {
+            balances[participant.user_id] = (balances[participant.user_id] || 0) - parseFloat(participant.share);
+          }
+        });
+      }
     });
 
     return balances;
@@ -264,83 +352,106 @@ export function ExpenseProvider({ children }) {
 
   // Calculate who owes whom
   const calculateSettlements = () => {
-    const balances = calculateBalances();
-    const settlements = [];
+    try {
+      const balances = calculateBalances();
+      const settlements = [];
 
-    // Create arrays of creditors (positive balance) and debtors (negative balance)
-    const creditors = Object.entries(balances)
-      .filter(([_, balance]) => balance > 0)
-      .map(([id, balance]) => ({ id, balance }))
-      .sort((a, b) => b.balance - a.balance);
-
-    const debtors = Object.entries(balances)
-      .filter(([_, balance]) => balance < 0)
-      .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
-      .sort((a, b) => b.balance - a.balance);
-
-    // Match debtors with creditors to settle debts
-    while (debtors.length > 0 && creditors.length > 0) {
-      const debtor = debtors[0];
-      const creditor = creditors[0];
-      
-      // Find the minimum of what's owed and what's due
-      const amount = Math.min(debtor.balance, creditor.balance);
-      
-      if (amount > 0) {
-        // Create a settlement record
-        settlements.push({
-          from: debtor.id,
-          to: creditor.id,
-          amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
-        });
-        
-        // Update balances
-        debtor.balance -= amount;
-        creditor.balance -= amount;
+      // Ensure we have balances to work with
+      if (!balances || Object.keys(balances).length === 0) {
+        return [];
       }
-      
-      // Remove entries with zero balance
-      if (debtor.balance < 0.01) debtors.shift();
-      if (creditor.balance < 0.01) creditors.shift();
-    }
 
-    return settlements;
+      // Create arrays of creditors (positive balance) and debtors (negative balance)
+      const creditors = Object.entries(balances)
+        .filter(([id, balance]) => balance > 0 && id)
+        .map(([id, balance]) => ({ id, balance }))
+        .sort((a, b) => b.balance - a.balance);
+
+      const debtors = Object.entries(balances)
+        .filter(([id, balance]) => balance < 0 && id)
+        .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
+        .sort((a, b) => b.balance - a.balance);
+
+      // Match debtors with creditors to settle debts
+      while (debtors.length > 0 && creditors.length > 0) {
+        const debtor = debtors[0];
+        const creditor = creditors[0];
+        
+        // Find the minimum of what's owed and what's due
+        const amount = Math.min(debtor.balance, creditor.balance);
+        
+        if (amount > 0) {
+          // Create a settlement record
+          settlements.push({
+            from: debtor.id,
+            to: creditor.id,
+            amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+          });
+          
+          // Update balances
+          debtor.balance -= amount;
+          creditor.balance -= amount;
+        }
+        
+        // Remove entries with zero balance
+        if (debtor.balance < 0.01) debtors.shift();
+        if (creditor.balance < 0.01) creditors.shift();
+      }
+
+      return settlements;
+    } catch (error) {
+      console.error('Error calculating settlements:', error);
+      return [];
+    }
   };
 
   // Get a trip by ID
   const getTripById = async (tripId) => {
     try {
-      // Validate that tripId is a string and not a Promise or other object
-      if (!tripId || typeof tripId !== "string") {
-        console.error("Invalid trip ID type:", typeof tripId, tripId);
-        return null;
-      }
-      
-      // Check if the ID is in a valid format (for UUID validation)
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tripId)) {
-        console.error("Invalid trip ID format:", tripId);
+      // Validate that tripId exists
+      if (!tripId) {
+        console.error("Missing trip ID");
         return null;
       }
       
       console.log("Fetching trip with ID (in store):", tripId);
       
-      const { data, error } = await supabase
+      // First, get the trip details
+      const { data: tripData, error: tripError } = await supabase
         .from("trips")
         .select("*")
         .eq("id", tripId)
         .single();
       
-      if (error) {
-        console.error("Error getting trip by ID:", error.message);
+      if (tripError) {
+        console.error("Error getting trip by ID:", tripError.message);
         return null;
       }
       
-      if (!data) {
+      if (!tripData) {
         console.error("Trip not found for ID:", tripId);
         return null;
       }
       
-      return data;
+      // Next, get the trip members
+      const { data: memberData, error: memberError } = await supabase
+        .from("trip_members")
+        .select("user_id")
+        .eq("trip_id", tripId);
+      
+      if (memberError) {
+        console.error("Error getting trip members:", memberError.message);
+        // Continue without members
+      }
+      
+      // Add members to trip data if available
+      if (memberData && memberData.length > 0) {
+        tripData.members = memberData.map(member => member.user_id);
+      } else {
+        tripData.members = [];
+      }
+      
+      return tripData;
     } catch (error) {
       console.error("Error fetching trip by ID:", error);
       return null;
@@ -480,10 +591,11 @@ export function ExpenseProvider({ children }) {
   };
 
   // Context value
-  const value = {
+  const contextValue = {
     friends,
     trips,
     expenses,
+    expenseParticipants,
     loading,
     error,
     addTrip,
@@ -494,11 +606,13 @@ export function ExpenseProvider({ children }) {
     deleteExpense,
     getFriendById,
     calculateBalances,
-    calculateSettlements
+    calculateSettlements,
+    addUser,
+    fetchData
   };
 
   return (
-    <ExpenseContext.Provider value={value}>
+    <ExpenseContext.Provider value={contextValue}>
       {children}
     </ExpenseContext.Provider>
   );

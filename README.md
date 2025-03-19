@@ -10,11 +10,34 @@ SplitRupee is a beautiful expense sharing application built with Next.js that he
 - **Expense Tracking**: Add expenses and split them among participants
 - **Smart Settlements**: Automatically calculates the optimal way to settle debts
 - **Beautiful UI**: Modern interface with animations and responsive design
-- **Local Storage**: All data is stored locally in your browser
+- **Database Storage**: All data is stored in Supabase for persistence
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+1. Create a Supabase account at [https://supabase.com](https://supabase.com)
+2. Create a new Supabase project
+3. Get your Supabase URL and anon key from the project settings
+
+### Database Setup
+
+1. In your Supabase project, go to the SQL Editor
+2. Copy the contents of the `setup-database.sql` file in this project
+3. Run the SQL to create all the necessary tables
+
+### Environment Setup
+
+Create a `.env.local` file in the root directory with the following variables:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### Running the App
+
+First, install dependencies and run the development server:
 
 ```bash
 npm install
@@ -29,7 +52,8 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 1. Click on "Create New Trip" on the homepage or navigate to the "Add Trip" page
 2. Fill in the trip details (name, description, date)
-3. Submit the form to create your trip
+3. Add friends who will be part of this trip
+4. Submit the form to create your trip
 
 ### Adding Expenses
 
@@ -59,7 +83,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 - **State Management**: React Context API
 - **Animations**: Framer Motion
 - **Icons**: React Icons
-- **Storage**: Browser's localStorage
+- **Storage**: Supabase
 
 ## Customization
 

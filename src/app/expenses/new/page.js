@@ -25,7 +25,7 @@ function ExpensePageContent() {
         // Get the trip ID from search params
         const rawTripId = searchParams.get("tripId");
         
-        // Only proceed if we have a valid string ID
+        // Only proceed if we have a valid ID
         if (rawTripId) {
           setTripId(rawTripId);
           
