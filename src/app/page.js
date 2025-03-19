@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight } from 'react-icons/fa';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight, FaExchangeAlt } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -106,6 +106,15 @@ function HomeContent() {
     const friend = friends.find(f => f.id === friendId);
     return friend ? friend.name : 'Unknown';
   };
+
+  // Get settlements for a specific friend
+  const getSettlementsForFriend = (friendId) => {
+    // Get settlements where this friend is either paying or receiving
+    return settlements.filter(s => s.from === friendId || s.to === friendId);
+  };
+
+  // State for the active tab in settlements
+  const [activeSettlementTab, setActiveSettlementTab] = useState('all');
 
   return (
     <div className="space-y-8">
@@ -233,40 +242,234 @@ function HomeContent() {
       </div>
       
       <div>
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Settlements</h2>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-primary to-purple-500 bg-clip-text">Settlements</h2>
           <Link href="/dashboard">
-            <Button variant="outline">View Details</Button>
+            <Button variant="outline" className="border-primary hover:bg-primary/10 transition-all duration-300">
+              <span className="mr-2">View Details</span>
+              <FaArrowRight size={12} />
+            </Button>
           </Link>
         </div>
         
         {settlements.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {settlements.slice(0, 4).map((settlement, index) => (
-              <Card key={index} className="p-4" elevation="medium">
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                  <div className="text-center sm:text-left">
-                    <p className="text-lg font-semibold">{getFriendName(settlement.from)}</p>
-                    <p className="text-sm text-gray-500">pays</p>
-                  </div>
-                  
-                  <div className="text-xl font-bold text-primary flex items-center">
-                    <IndianRupee className="h-5 w-5 mr-1" />
-                    {settlement.amount.toFixed(2)}
-                  </div>
-                  
-                  <div className="text-center sm:text-right">
-                    <p className="text-lg font-semibold">{getFriendName(settlement.to)}</p>
-                    <p className="text-sm text-gray-500">receives</p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="bg-gradient-to-br from-gray-50/50 to-gray-100/50 dark:from-gray-800/50 dark:to-gray-900/50 p-6 rounded-2xl shadow-lg backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50"
+          >
+            {/* Tabs for settlements */}
+            <div className="mb-6 border-b border-gray-200/50 dark:border-gray-700/50 pb-1 overflow-x-auto hide-scrollbar">
+              <ul className="flex flex-nowrap text-sm font-medium text-center">
+                <li className="mr-1">
+                  <button
+                    onClick={() => setActiveSettlementTab('all')}
+                    className={`inline-block px-6 py-3 rounded-t-lg transition-all duration-300 ${
+                      activeSettlementTab === 'all'
+                        ? 'text-white bg-gradient-to-r from-primary to-purple-500 shadow-md'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    <FaExchangeAlt className="inline mr-2" size={14} />
+                    All Settlements
+                  </button>
+                </li>
+                {friends.map(friend => (
+                  <li key={friend.id} className="mr-1">
+                    <button
+                      onClick={() => setActiveSettlementTab(friend.id)}
+                      className={`inline-block px-6 py-3 rounded-t-lg transition-all duration-300 ${
+                        activeSettlementTab === friend.id
+                          ? 'text-white bg-gradient-to-r from-primary to-purple-500 shadow-md'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      <div className="inline-flex items-center">
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mr-2 text-xs shadow-sm">
+                          {friend.name.charAt(0)}
+                        </div>
+                        {friend.name}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            
+            {/* Settlement content based on active tab */}
+            <AnimatePresence mode="wait">
+              <motion.div 
+                key={activeSettlementTab}
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.3 }}
+                className="grid grid-cols-1 md:grid-cols-2 gap-6"
+              >
+                {activeSettlementTab === 'all' ? (
+                  // Show all settlements (limited to 4)
+                  settlements.slice(0, 4).map((settlement, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: index * 0.1 }}
+                    >
+                      <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-purple-500"></div>
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                          <div className="text-center sm:text-left">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                              {getFriendName(settlement.from).charAt(0)}
+                            </div>
+                            <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                            <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                              <span className="mr-1">pays</span>
+                              <FaArrowRight size={10} className="text-gray-400" />
+                            </p>
+                          </div>
+                          
+                          <div className="text-xl font-bold text-primary bg-primary/10 px-4 py-2 rounded-full flex items-center shadow-inner">
+                            <IndianRupee className="h-5 w-5 mr-1" />
+                            {settlement.amount.toFixed(2)}
+                          </div>
+                          
+                          <div className="text-center sm:text-right">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                              {getFriendName(settlement.to).charAt(0)}
+                            </div>
+                            <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                            <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                              <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                              <span>receives</span>
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))
+                ) : (
+                  // Show settlements for the selected friend
+                  getSettlementsForFriend(activeSettlementTab).length > 0 ? (
+                    getSettlementsForFriend(activeSettlementTab).map((settlement, index) => {
+                      const isReceiving = settlement.to === activeSettlementTab;
+                      
+                      return (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.1 }}
+                        >
+                          <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-green-50/50 dark:bg-green-900/20' : 'bg-red-50/50 dark:bg-red-900/20'}`}>
+                            <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-green-500 to-green-700' : 'bg-gradient-to-b from-red-500 to-red-700'}`}></div>
+                            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                              {isReceiving ? (
+                                // This friend is receiving money
+                                <>
+                                  <div className="text-center sm:text-left">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                      {getFriendName(settlement.from).charAt(0)}
+                                    </div>
+                                    <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                      <span className="mr-1">pays you</span>
+                                      <FaArrowRight size={10} className="text-gray-400" />
+                                    </p>
+                                  </div>
+                                  
+                                  <div className="text-xl font-bold text-green-600 bg-green-100 dark:bg-green-900/40 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                    <IndianRupee className="h-5 w-5 mr-1" />
+                                    {settlement.amount.toFixed(2)}
+                                  </div>
+                                  
+                                  <div className="text-center sm:text-right">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                      <span className="text-xl">You</span>
+                                    </div>
+                                    <p className="text-lg font-semibold mt-2">You</p>
+                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                      <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                      <span>receive</span>
+                                    </p>
+                                  </div>
+                                </>
+                              ) : (
+                                // This friend is paying money
+                                <>
+                                  <div className="text-center sm:text-left">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                      <span className="text-xl">You</span>
+                                    </div>
+                                    <p className="text-lg font-semibold mt-2">You</p>
+                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                      <span className="mr-1">pay</span>
+                                      <FaArrowRight size={10} className="text-gray-400" />
+                                    </p>
+                                  </div>
+                                  
+                                  <div className="text-xl font-bold text-red-600 bg-red-100 dark:bg-red-900/40 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                    <IndianRupee className="h-5 w-5 mr-1" />
+                                    {settlement.amount.toFixed(2)}
+                                  </div>
+                                  
+                                  <div className="text-center sm:text-right">
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                      {getFriendName(settlement.to).charAt(0)}
+                                    </div>
+                                    <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                      <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                      <span>receives</span>
+                                    </p>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </Card>
+                        </motion.div>
+                      );
+                    })
+                  ) : (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="col-span-1 md:col-span-2"
+                    >
+                      <Card className="text-center p-8 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-0 shadow-md">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-300 text-lg">
+                          <span className="font-semibold">{getFriendName(activeSettlementTab)}</span> is all settled up!
+                        </p>
+                        <p className="text-gray-500 dark:text-gray-400 mt-2">No payments needed at this time.</p>
+                      </Card>
+                    </motion.div>
+                  )
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
         ) : (
-          <Card className="text-center p-8">
-            <p className="text-gray-500">Everyone is settled up! No payments needed.</p>
-          </Card>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Card className="text-center p-8 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-0 shadow-md">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-gray-600 dark:text-gray-300 text-lg font-semibold">Everyone is settled up!</p>
+              <p className="text-gray-500 dark:text-gray-400 mt-2">No payments needed at this time.</p>
+            </Card>
+          </motion.div>
         )}
       </div>
     </div>

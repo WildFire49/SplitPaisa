@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck, FaExchangeAlt, FaMoneyBillWave, FaArrowRight } from "react-icons/fa";
+import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck, FaExchangeAlt, FaMoneyBillWave, FaArrowRight, FaUserFriends, FaTimes } from "react-icons/fa";
 import { useExpenseStore } from "@/store/expenseStore";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { ArrowRight, IndianRupee } from "lucide-react";
+import AddTripMember from "@/components/trips/AddTripMember";
 
 // Client component that uses useParams
 function TripDetailsContent() {
@@ -26,7 +27,11 @@ function TripDetailsContent() {
     deleteExpense,
     friends,
     loading,
-    error
+    error,
+    trips,
+    expenses: allExpenses,
+    getTripMembers,
+    removeTripMember
   } = useExpenseStore();
   
   const [trip, setTrip] = useState(null);
@@ -37,75 +42,130 @@ function TripDetailsContent() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  
+  const [tripMembers, setTripMembers] = useState([]);
+  const [removingMember, setRemovingMember] = useState(null);
+
   // Track if data has been fetched to prevent duplicate API calls
   const dataFetched = useRef(false);
   const pendingRequest = useRef(false);
 
   // Calculate settlements specific to this trip
   const calculateTripSettlements = useCallback((tripExpenses) => {
-    // Initialize balances for all friends
-    const balances = {};
-    friends.forEach(friend => {
-      balances[friend.id] = 0;
-    });
-
-    // Calculate net balance for each friend based on trip expenses only
-    tripExpenses.forEach(expense => {
-      // Add amount to payer's balance (they are owed this money)
-      balances[expense.paid_by] += parseFloat(expense.amount);
-      
-      // Distribute expense among participants
-      expense.expense_participants.forEach(participant => {
-        // Subtract share amount from each participant's balance (they owe this money)
-        balances[participant.user_id] -= parseFloat(participant.share);
+    try {
+      // Initialize balances for all friends
+      const balances = {};
+      friends.forEach(friend => {
+        balances[friend.id] = 0;
       });
-    });
 
-    setTripBalances(balances);
+      console.log("Initial balances:", balances);
+      console.log("Trip expenses:", tripExpenses);
 
-    // Calculate settlements using the same algorithm as in expenseStore
-    const settlements = [];
-
-    // Create arrays of creditors (positive balance) and debtors (negative balance)
-    const creditors = Object.entries(balances)
-      .filter(([_, balance]) => balance > 0)
-      .map(([id, balance]) => ({ id, balance }))
-      .sort((a, b) => b.balance - a.balance);
-
-    const debtors = Object.entries(balances)
-      .filter(([_, balance]) => balance < 0)
-      .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
-      .sort((a, b) => b.balance - a.balance);
-
-    // Match debtors with creditors to settle debts
-    while (debtors.length > 0 && creditors.length > 0) {
-      const debtor = debtors[0];
-      const creditor = creditors[0];
+      // Create a map to track who owes what to whom
+      const debts = {};
       
-      // Find the minimum of what's owed and what's due
-      const amount = Math.min(debtor.balance, creditor.balance);
+      // Initialize the debt tracking structure
+      friends.forEach(debtor => {
+        debts[debtor.id] = {};
+        friends.forEach(creditor => {
+          if (debtor.id !== creditor.id) {
+            debts[debtor.id][creditor.id] = 0;
+          }
+        });
+      });
       
-      if (amount > 0) {
-        // Create a settlement record
-        settlements.push({
-          from: debtor.id,
-          to: creditor.id,
-          amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+      // Process each expense to determine who owes what to whom
+      tripExpenses.forEach(expense => {
+        const payer = expense.paid_by;
+        if (!payer) return;
+        
+        // Get participants for this expense
+        const participants = expense.expense_participants;
+        if (!participants || !Array.isArray(participants) || participants.length === 0) {
+          console.error(`Missing or invalid expense_participants for expense ${expense.id} (${expense.description})`);
+          return;
+        }
+        
+        // Calculate each participant's debt to the payer
+        participants.forEach(participant => {
+          if (participant.user_id && participant.user_id !== payer) {
+            const share = parseFloat(participant.share);
+            
+            // Add to the debt that this participant owes to the payer
+            if (debts[participant.user_id] && debts[participant.user_id][payer] !== undefined) {
+              debts[participant.user_id][payer] += share;
+            }
+            
+            // Update balances for UI display
+            balances[participant.user_id] = (balances[participant.user_id] || 0) - share;
+          }
         });
         
-        // Update balances
-        debtor.balance -= amount;
-        creditor.balance -= amount;
-      }
+        // Update the payer's balance
+        const payerShare = participants.find(p => p.user_id === payer)?.share || 0;
+        const paidForOthers = parseFloat(expense.amount) - parseFloat(payerShare);
+        balances[payer] = (balances[payer] || 0) + paidForOthers;
+      });
       
-      // Remove entries with zero balance
-      if (debtor.balance < 0.01) debtors.shift();
-      if (creditor.balance < 0.01) creditors.shift();
+      console.log("Final balances:", balances);
+      setTripBalances(balances);
+      
+      console.log("Raw debts:", JSON.stringify(debts, null, 2));
+      
+      // Simplify debts (if A owes B and B owes A, cancel out the common amount)
+      friends.forEach(person1 => {
+        friends.forEach(person2 => {
+          if (person1.id !== person2.id) {
+            // If both owe each other, cancel out the common amount
+            const debt1to2 = debts[person1.id][person2.id] || 0;
+            const debt2to1 = debts[person2.id][person1.id] || 0;
+            
+            if (debt1to2 > 0 && debt2to1 > 0) {
+              // Calculate the net debt
+              const netDebt = Math.abs(debt1to2 - debt2to1);
+              
+              if (debt1to2 > debt2to1) {
+                // person1 still owes person2
+                debts[person1.id][person2.id] = netDebt;
+                debts[person2.id][person1.id] = 0;
+              } else {
+                // person2 still owes person1
+                debts[person2.id][person1.id] = netDebt;
+                debts[person1.id][person2.id] = 0;
+              }
+            }
+          }
+        });
+      });
+      
+      console.log("Simplified debts:", JSON.stringify(debts, null, 2));
+      
+      // Create settlement records from the debts
+      const settlements = [];
+      Object.entries(debts).forEach(([debtorId, creditors]) => {
+        Object.entries(creditors).forEach(([creditorId, amount]) => {
+          if (amount > 0.01) { // Only create settlements for non-zero amounts
+            const debtorName = getFriendById(debtorId)?.name || "Unknown";
+            const creditorName = getFriendById(creditorId)?.name || "Unknown";
+            
+            console.log(`Settlement: ${debtorName} pays ${creditorName} ${amount}`);
+            
+            settlements.push({
+              from: debtorId,
+              to: creditorId,
+              amount: amount
+            });
+          }
+        });
+      });
+      
+      console.log("Final settlements:", settlements);
+      setTripSettlements(settlements);
+    } catch (error) {
+      console.error("Error calculating trip settlements:", error);
+      setTripSettlements([]);
     }
-
-    setTripSettlements(settlements);
-  }, [friends]);
+  }, [friends, getFriendById]);
 
   useEffect(() => {
     const fetchTripData = async () => {
@@ -126,6 +186,7 @@ function TripDetailsContent() {
       if (!tripId) {
         console.error("Invalid trip ID:", params);
         setLoadError("Invalid trip ID");
+        setIsLoading(false);
         return;
       }
       
@@ -138,7 +199,9 @@ function TripDetailsContent() {
         
         if (!tripData) {
           console.error("Trip not found for ID:", tripId);
-          setLoadError("Trip not found");
+          setLoadError(`Trip not found. The trip with ID ${tripId} may have been deleted or does not exist.`);
+          setIsLoading(false);
+          pendingRequest.current = false;
           return;
         }
         
@@ -150,11 +213,15 @@ function TripDetailsContent() {
         calculateTripSettlements(tripExpenses);
         setLoadError(null);
         
+        // Get trip members
+        const members = await getTripMembers(tripId);
+        setTripMembers(members);
+        
         // Mark data as fetched
         dataFetched.current = true;
       } catch (err) {
         console.error("Error loading trip details:", err);
-        setLoadError("Failed to load trip details. Please try again.");
+        setLoadError(`Failed to load trip details: ${err.message}. Please try again.`);
       } finally {
         setIsLoading(false);
         pendingRequest.current = false;
@@ -164,7 +231,35 @@ function TripDetailsContent() {
     if (!loading && tripId) {
       fetchTripData();
     }
-  }, [tripId, getTripById, getExpensesByTrip, calculateTripSettlements, loading, trip, params]);
+  }, [tripId, getTripById, getExpensesByTrip, calculateTripSettlements, loading, trip, params, getTripMembers]);
+
+  // Handle removing a trip member
+  const handleRemoveMember = async (userId) => {
+    if (!tripId || !userId) return;
+    
+    setRemovingMember(userId);
+    
+    try {
+      await removeTripMember(tripId, userId);
+      
+      // Update the local state
+      setTripMembers(prev => prev.filter(id => id !== userId));
+    } catch (err) {
+      console.error("Error removing trip member:", err);
+      alert(err.message || "Failed to remove member");
+    } finally {
+      setRemovingMember(null);
+    }
+  };
+
+  // Handle when a new member is added
+  const handleMemberAdded = async () => {
+    // Refresh the trip members
+    if (tripId) {
+      const members = await getTripMembers(tripId);
+      setTripMembers(members);
+    }
+  };
 
   // Calculate total expenses for this trip
   const totalExpenses = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
@@ -221,13 +316,18 @@ function TripDetailsContent() {
     );
   }
 
-  if (error || loadError) {
+  if (loadError) {
     return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <Card className="p-6 max-w-md w-full">
-          <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
-          <p className="text-gray-700">{error || loadError}</p>
-        </Card>
+      <div className="p-8 text-center">
+        <div className="bg-red-50 p-6 rounded-lg mb-6">
+          <h2 className="text-2xl font-bold text-red-700 mb-4">Error</h2>
+          <p className="text-red-600 mb-4">{loadError}</p>
+          <Link href="/trips">
+            <Button variant="primary" className="mx-auto">
+              Return to Trips
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -248,46 +348,95 @@ function TripDetailsContent() {
 
   return (
     <div className="space-y-8">
-      {/* Trip Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">{trip.name}</h1>
-          <p className="text-gray-500">
-            {new Date(trip.date || trip.created_at).toLocaleDateString("en-IN", {
-              year: "numeric",
-              month: "long",
-              day: "numeric"
-            })}
-          </p>
+      {/* Trip Info */}
+      <section className="mb-8">
+        <div className="flex justify-between items-start mb-4">
+          <h1 className="text-3xl font-bold">{trip?.name || "Trip Details"}</h1>
+          <div className="flex space-x-2">
+            <Link href={`/expenses/new?tripId=${tripId}`}>
+              <Button
+                variant="primary"
+                size="sm"
+                className="flex items-center"
+              >
+                <FaPlus className="mr-2" />
+                Add Expense
+              </Button>
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleShareTrip}
+              className="flex items-center"
+            >
+              <FaShare className="mr-2" />
+              {copied ? "Copied!" : "Share"}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center"
+            >
+              <FaTrash className="mr-2" />
+              Delete
+            </Button>
+          </div>
         </div>
         
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/expenses/new?tripId=${tripId}`}>
-            <Button className="flex items-center gap-2">
-              <FaPlus /> Add Expense
-            </Button>
-          </Link>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <Card className="p-4">
+            <h3 className="text-lg font-medium mb-2">Trip Details</h3>
+            <p className="text-gray-600 mb-1"><span className="font-medium">Date:</span> {trip?.date ? new Date(trip.date).toLocaleDateString() : "Not specified"}</p>
+            <p className="text-gray-600 mb-1"><span className="font-medium">Location:</span> {trip?.location || "Not specified"}</p>
+            <p className="text-gray-600"><span className="font-medium">Description:</span> {trip?.description || "No description provided"}</p>
+          </Card>
           
-          <Button 
-            variant="outline" 
-            className="flex items-center gap-2"
-            onClick={handleShareTrip}
-          >
-            {copied ? <FaCheck /> : <FaShare />}
-            {copied ? "Copied!" : "Share"}
-          </Button>
-          
-          <Button 
-            variant="outline" 
-            className="flex items-center gap-2 text-error hover:bg-error hover:text-white"
-            onClick={handleDeleteTrip}
-          >
-            <FaTrash />
-            {confirmDelete ? "Confirm Delete" : "Delete Trip"}
-          </Button>
+          <Card className="p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-lg font-medium">Trip Members</h3>
+            </div>
+            
+            <div className="space-y-2 mb-3">
+              {tripMembers.length > 0 ? (
+                tripMembers.map(memberId => {
+                  const member = getFriendById(memberId);
+                  if (!member) return null;
+                  
+                  return (
+                    <div key={memberId} className="flex items-center justify-between p-3 bg-[#1e293b] border-2 border-[#334155] rounded-lg shadow-md hover:shadow-lg transition-all">
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#4F46E5] via-[#6366F1] to-[#818CF8] flex items-center justify-center text-[#f8fafc] mr-3 shadow-md">
+                          {member.name.charAt(0)}
+                        </div>
+                        <span className="font-medium text-[#f8fafc]">{member.name}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveMember(memberId)}
+                        disabled={removingMember === memberId}
+                        className="text-[#ef4444] hover:text-[#f87171] hover:bg-[#1e293b] rounded-full p-2"
+                      >
+                        {removingMember === memberId ? (
+                          <span className="text-xs">Removing...</span>
+                        ) : (
+                          <FaTimes />
+                        )}
+                      </Button>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-gray-500 text-sm">No members added to this trip yet.</p>
+              )}
+            </div>
+            
+            <AddTripMember tripId={tripId} onMemberAdded={handleMemberAdded} />
+          </Card>
         </div>
-      </div>
-      
+      </section>
+        
       {/* Trip Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6">
@@ -392,54 +541,138 @@ function TripDetailsContent() {
       
       {/* Settlements */}
       <section>
-        <h2 className="text-2xl font-semibold mb-4 flex items-center">
-          <FaExchangeAlt className="mr-2" /> Settlements
-        </h2>
-        
-        {tripSettlements.length > 0 ? (
-          <div className="space-y-4">
-            {tripSettlements.map((settlement, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <Card className="p-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-center">
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                        <div className="flex items-center justify-center px-3 py-2 rounded-lg bg-tertiary-100 dark:bg-tertiary-900 text-tertiary-600 dark:text-tertiary-400 font-medium">
-                          {getFriendById(settlement.from)?.name || "Unknown"}
-                        </div>
-                        <div className="flex items-center my-2 sm:my-0">
-                          <FaArrowRight className="mx-2 text-gray-400" />
-                        </div>
-                        <div className="flex items-center justify-center px-3 py-2 rounded-lg bg-secondary-100 dark:bg-secondary-900 text-secondary-600 dark:text-secondary-400 font-medium">
-                          {getFriendById(settlement.to)?.name || "Unknown"}
-                        </div>
+        <div className="mt-8">
+          <h3 className="text-xl font-semibold mb-4">Settlements</h3>
+          {tripSettlements.length > 0 ? (
+            <div className="space-y-4">
+              {tripSettlements.map((settlement, index) => {
+                const fromFriend = getFriendById(settlement.from);
+                const toFriend = getFriendById(settlement.to);
+                
+                if (!fromFriend || !toFriend) {
+                  console.error(`Friend not found for settlement: from=${settlement.from}, to=${settlement.to}`);
+                  return null;
+                }
+                
+                return (
+                  <div key={index} className="flex items-center p-4 bg-[#1e293b] border-2 border-[#334155] rounded-xl shadow-md hover:shadow-lg transition-all">
+                    <div className="flex-1 flex items-center">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#059669] via-[#10B981] to-[#34D399] flex items-center justify-center text-[#f8fafc] mr-3 shadow-md">
+                        {fromFriend.name.charAt(0)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-[#f8fafc]">{fromFriend.name}</p>
+                        <p className="text-sm text-[#d1d5db] flex items-center">
+                          <span className="mr-1">pays</span> 
+                          <span role="img" aria-label="money">💸</span>
+                        </p>
                       </div>
                     </div>
-                    <div className="flex items-center bg-primary-50 dark:bg-primary-900/30 px-4 py-2 rounded-lg">
-                      <FaMoneyBillWave className="mr-2 text-primary-500" />
-                      <span className="font-bold text-primary-700 dark:text-primary-300">
-                        {formatCurrency(settlement.amount)}
-                      </span>
+                    
+                    <div className="flex-1 text-center">
+                      <div className="font-bold text-lg bg-[#0f172a] py-2 px-4 rounded-full shadow-inner border border-[#334155] text-[#f8fafc]">
+                        ₹{settlement.amount.toFixed(2)}
+                      </div>
+                      <div className="text-[#d1d5db] my-1">
+                        <FaArrowRight className="inline mx-2" />
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 flex items-center justify-end">
+                      <div className="flex-1 text-right">
+                        <p className="font-semibold text-[#f8fafc]">{toFriend.name}</p>
+                        <p className="text-sm text-[#d1d5db] flex items-center justify-end">
+                          <span role="img" aria-label="money bag">💰</span>
+                          <span className="ml-1">receives</span>
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#34D399] via-[#10B981] to-[#059669] flex items-center justify-center text-[#f8fafc] ml-3 shadow-md">
+                        {toFriend.name.charAt(0)}
+                      </div>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-3">
-                    <span className="font-medium">{getFriendById(settlement.from)?.name || "Unknown"}</span> needs to pay <span className="font-medium">{getFriendById(settlement.to)?.name || "Unknown"}</span>
-                  </p>
-                </Card>
-              </motion.div>
-            ))}
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <p className="text-gray-500">No settlements needed. Everyone is square!</p>
+            </div>
+          )}
+        </div>
+        
+        {/* Individual Balances */}
+        <div className="mt-8">
+          <h3 className="text-xl font-semibold mb-4">Individual Balances</h3>
+          <div className="grid grid-cols-1 gap-4">
+            {Object.entries(tripBalances).map(([friendId, balance]) => {
+              const friend = getFriendById(friendId);
+              if (!friend) return null;
+              
+              const isPositive = balance > 0;
+              const isNegative = balance < 0;
+              const isZero = Math.abs(balance) < 0.01;
+              
+              let statusText = "is settled up";
+              let statusClass = "text-[#d1d5db]";
+              let bgColor = "bg-[#1e293b]";
+              let borderColor = "border-[#334155]";
+              let emoji = "✓";
+              
+              if (isPositive) {
+                statusText = "is owed";
+                statusClass = "text-[#34D399]";
+                bgColor = "bg-[#1e293b]";
+                borderColor = "border-[#10B981]";
+                
+                // Different emojis based on amount owed
+                if (balance > 1000) {
+                  emoji = "🤑";
+                } else if (balance > 500) {
+                  emoji = "💰";
+                } else {
+                  emoji = "💵";
+                }
+              } else if (isNegative) {
+                statusText = "owes";
+                statusClass = "text-[#ef4444]";
+                bgColor = "bg-[#1e293b]";
+                borderColor = "border-[#ef4444]";
+                
+                // Different emojis based on amount owed
+                if (Math.abs(balance) > 1000) {
+                  emoji = "😱";
+                } else if (Math.abs(balance) > 500) {
+                  emoji = "😰";
+                } else {
+                  emoji = "😓";
+                }
+              }
+              
+              return (
+                <div key={friendId} className={`flex items-center p-4 ${bgColor} border-2 ${borderColor} rounded-xl shadow-md hover:shadow-lg transition-all`}>
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#D97706] via-[#F59E0B] to-[#FBBF24] flex items-center justify-center text-[#f8fafc] mr-3 shadow-md">
+                    {friend.name.charAt(0)}
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-[#f8fafc]">{friend.name}</p>
+                    <div className="flex items-center">
+                      <p className={`text-sm ${statusClass} font-medium flex items-center`}>
+                        <span className="mr-2">{statusText}</span>
+                        {!isZero && (
+                          <>
+                            <span className="font-bold mr-2">₹{Math.abs(balance).toFixed(2)}</span>
+                            <span role="img" aria-label="status">{emoji}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          <Card className="p-6 text-center">
-            <FaExchangeAlt className="mx-auto text-gray-400 mb-2" size={24} />
-            <p className="text-gray-500">Everyone is settled up! No payments needed.</p>
-          </Card>
-        )}
+        </div>
       </section>
     </div>
   );

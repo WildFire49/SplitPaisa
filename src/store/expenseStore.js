@@ -4,19 +4,11 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback } f
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 
-// Initial friends list - will be replaced with users from Supabase
-const initialFriends = [
-  { id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', name: 'Lakshay' },
-  { id: '550e8400-e29b-41d4-a716-446655440000', name: 'Siddhu' },
-  { id: 'b3ba141a-a776-4380-b97a-f53c45a9d978', name: 'Shubham' },
-  { id: 'c3d3b5a6-7e62-4a3c-9142-0e1c2d3a4b5c', name: 'Vaishakh' }
-];
-
 // Create context
 const ExpenseContext = createContext();
 
 export function ExpenseProvider({ children }) {
-  const [friends, setFriends] = useState(initialFriends);
+  const [friends, setFriends] = useState([]);
   const [trips, setTrips] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [expenseParticipants, setExpenseParticipants] = useState([]);
@@ -185,24 +177,8 @@ export function ExpenseProvider({ children }) {
       } else if (usersData && usersData.length > 0) {
         // Use users from database
         setFriends(usersData);
-      } else if (!signal.aborted) {
-        // No users in database, add initial friends
-        console.log('No users found in database, adding initial friends');
-        
-        // Add each initial friend to the database
-        for (const friend of initialFriends) {
-          const { error } = await supabase
-            .from('users')
-            .insert([friend])
-            .abortSignal(signal);
-          
-          if (error) {
-            console.error('Error adding initial friend:', error);
-          }
-        }
-        
-        // Set friends to initialFriends
-        setFriends(initialFriends);
+      } else {
+        console.log('No users found in database');
       }
       
       // Mark data as fetched
@@ -365,12 +341,17 @@ export function ExpenseProvider({ children }) {
       
       if (!signal.aborted) {
         // Create expense participants
-        const participants = expense.participants.map(participantId => ({
-          id: uuidv4(),
-          expense_id: expenseId,
-          user_id: participantId,
-          share: expense.amount / expense.participants.length
-        }));
+        const participants = expense.participants.map(participantId => {
+          // Calculate the exact share for each participant without rounding
+          const exactShare = expense.amount / expense.participants.length;
+          
+          return {
+            id: uuidv4(),
+            expense_id: expenseId,
+            user_id: participantId,
+            share: exactShare
+          };
+        });
         
         console.log("Adding expense participants:", participants);
         
@@ -391,6 +372,104 @@ export function ExpenseProvider({ children }) {
       if (err.name !== 'AbortError') {
         console.error('Error adding expense:', err.message || JSON.stringify(err));
         setError('Failed to add expense. Please try again.');
+      }
+      return null;
+    } finally {
+      delete pendingRequests.current[requestId];
+    }
+  }, []);
+
+  // Add a new friend
+  const addFriend = useCallback(async (friendData) => {
+    if (!friendData || !friendData.name) {
+      throw new Error("Friend name is required");
+    }
+    
+    const requestId = 'addFriend';
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
+    try {
+      const userId = uuidv4();
+      
+      const newFriend = {
+        id: userId,
+        name: friendData.name.trim(),
+        created_at: new Date().toISOString()
+      };
+      
+      console.log("Adding friend:", newFriend);
+      
+      const { error } = await supabase
+        .from('users')
+        .insert([newFriend])
+        .abortSignal(signal);
+      
+      if (error) {
+        console.error('Error adding friend:', error);
+        throw new Error(`Failed to add friend: ${error.message}`);
+      }
+      
+      // Update local state
+      setFriends(prev => [...prev, newFriend]);
+      
+      return newFriend;
+    } catch (err) {
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error adding friend:', err.message || JSON.stringify(err));
+        throw err;
+      }
+      return null;
+    } finally {
+      delete pendingRequests.current[requestId];
+    }
+  }, []);
+
+  // Edit a friend
+  const editFriend = useCallback(async (friendId, friendData) => {
+    if (!friendId) {
+      throw new Error("Friend ID is required");
+    }
+    
+    if (!friendData || !friendData.name) {
+      throw new Error("Friend name is required");
+    }
+    
+    const requestId = `editFriend_${friendId}`;
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
+    try {
+      const updatedFriend = {
+        name: friendData.name.trim(),
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log("Updating friend:", friendId, updatedFriend);
+      
+      const { error } = await supabase
+        .from('users')
+        .update(updatedFriend)
+        .eq('id', friendId)
+        .abortSignal(signal);
+      
+      if (error) {
+        console.error('Error updating friend:', error);
+        throw new Error(`Failed to update friend: ${error.message}`);
+      }
+      
+      // Update local state
+      setFriends(prev => prev.map(friend => 
+        friend.id === friendId ? { ...friend, ...updatedFriend } : friend
+      ));
+      
+      return { id: friendId, ...updatedFriend };
+    } catch (err) {
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error updating friend:', err.message || JSON.stringify(err));
+        throw err;
       }
       return null;
     } finally {
@@ -452,87 +531,166 @@ export function ExpenseProvider({ children }) {
       balances[friend.id] = 0;
     });
 
+    console.log("Initial balances in store:", balances);
+    console.log("All expenses:", expenses);
+    console.log("All expense participants:", expenseParticipants);
+
     // Calculate net balance for each friend
     expenses.forEach(expense => {
-      // Add amount to payer's balance (they are owed this money)
-      if (expense.paid_by) {
-        balances[expense.paid_by] = (balances[expense.paid_by] || 0) + parseFloat(expense.amount);
-      }
-      
       // Find participants for this expense
       const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
+      console.log(`Participants for expense "${expense.description}":`, participants);
       
-      // Distribute expense among participants
-      if (participants && participants.length > 0) {
-        participants.forEach(participant => {
-          // Subtract share amount from each participant's balance (they owe this money)
-          if (participant.user_id) {
-            balances[participant.user_id] = (balances[participant.user_id] || 0) - parseFloat(participant.share);
-          }
-        });
+      if (!participants || participants.length === 0) {
+        console.log(`No participants found for expense "${expense.description}"`);
+        return; // Skip this expense
       }
+      
+      // Calculate total shares for verification
+      const totalShares = participants.reduce((sum, p) => sum + parseFloat(p.share), 0);
+      console.log(`Total shares for expense "${expense.description}": ${totalShares}, Expense amount: ${expense.amount}`);
+      
+      // Verify that total shares match the expense amount (within a small tolerance for floating point errors)
+      if (Math.abs(totalShares - parseFloat(expense.amount)) > 0.01) {
+        console.warn(`Warning: Total shares (${totalShares}) don't match expense amount (${expense.amount}) for "${expense.description}"`);
+      }
+      
+      // Add amount to payer's balance (they are owed this money)
+      if (expense.paid_by) {
+        const friendName = friends.find(f => f.id === expense.paid_by)?.name || "Unknown";
+        
+        // The payer paid the full amount
+        const fullAmount = parseFloat(expense.amount);
+        
+        // Find the payer's own share
+        const payerParticipant = participants.find(p => p.user_id === expense.paid_by);
+        const payerOwnShare = payerParticipant ? parseFloat(payerParticipant.share) : 0;
+        
+        // The payer is owed the amount they paid for others
+        const paidForOthers = fullAmount - payerOwnShare;
+        
+        balances[expense.paid_by] = (balances[expense.paid_by] || 0) + paidForOthers;
+        console.log(`After payer ${expense.paid_by} (${friendName}) added ${paidForOthers} for expense "${expense.description}":`, {...balances});
+      }
+      
+      // Distribute expense among participants (excluding the payer)
+      participants.forEach(participant => {
+        // Skip the payer as we've already handled their balance
+        if (participant.user_id && participant.user_id !== expense.paid_by) {
+          const friendName = friends.find(f => f.id === participant.user_id)?.name || "Unknown";
+          const share = parseFloat(participant.share); // Use exact share without rounding
+          balances[participant.user_id] = (balances[participant.user_id] || 0) - share;
+          console.log(`After participant ${participant.user_id} (${friendName}) subtracted ${share}:`, {...balances});
+        }
+      });
     });
 
+    console.log("Final balances in store:", balances);
     return balances;
   }, [friends, expenses, expenseParticipants]);
 
   // Calculate who owes whom
   const calculateSettlements = useCallback(() => {
     try {
-      const balances = calculateBalances();
       const settlements = [];
-
-      // Ensure we have balances to work with
-      if (!balances || Object.keys(balances).length === 0) {
-        return [];
-      }
-
-      // Create arrays of creditors (positive balance) and debtors (negative balance)
-      const creditors = Object.entries(balances)
-        .filter(([id, balance]) => balance > 0 && id)
-        .map(([id, balance]) => ({ id, balance }))
-        .sort((a, b) => b.balance - a.balance);
-
-      const debtors = Object.entries(balances)
-        .filter(([id, balance]) => balance < 0 && id)
-        .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
-        .sort((a, b) => b.balance - a.balance);
-
-      // Match debtors with creditors to settle debts
-      while (debtors.length > 0 && creditors.length > 0) {
-        const debtor = debtors[0];
-        const creditor = creditors[0];
+      
+      // Create a map to track who owes what to whom
+      const debts = {};
+      
+      // Initialize the debt tracking structure
+      friends.forEach(debtor => {
+        debts[debtor.id] = {};
+        friends.forEach(creditor => {
+          if (debtor.id !== creditor.id) {
+            debts[debtor.id][creditor.id] = 0;
+          }
+        });
+      });
+      
+      // Process each expense to determine who owes what to whom
+      expenses.forEach(expense => {
+        const payer = expense.paid_by;
+        if (!payer) return;
         
-        // Find the minimum of what's owed and what's due
-        const amount = Math.min(debtor.balance, creditor.balance);
+        // Get participants for this expense
+        const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
+        if (!participants || participants.length === 0) return;
         
-        if (amount > 0) {
-          // Create a settlement record
-          settlements.push({
-            from: debtor.id,
-            to: creditor.id,
-            amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
-          });
-          
-          // Update balances
-          debtor.balance -= amount;
-          creditor.balance -= amount;
-        }
-        
-        // Remove entries with zero balance
-        if (debtor.balance < 0.01) debtors.shift();
-        if (creditor.balance < 0.01) creditors.shift();
-      }
-
+        // Calculate each participant's debt to the payer
+        participants.forEach(participant => {
+          if (participant.user_id && participant.user_id !== payer) {
+            const share = parseFloat(participant.share);
+            
+            // Add to the debt that this participant owes to the payer
+            if (debts[participant.user_id] && debts[participant.user_id][payer] !== undefined) {
+              debts[participant.user_id][payer] += share;
+            }
+          }
+        });
+      });
+      
+      console.log("Raw debts:", JSON.stringify(debts, null, 2));
+      
+      // Simplify debts (if A owes B and B owes A, cancel out the common amount)
+      friends.forEach(person1 => {
+        friends.forEach(person2 => {
+          if (person1.id !== person2.id) {
+            // If both owe each other, cancel out the common amount
+            const debt1to2 = debts[person1.id][person2.id] || 0;
+            const debt2to1 = debts[person2.id][person1.id] || 0;
+            
+            if (debt1to2 > 0 && debt2to1 > 0) {
+              // Calculate the net debt
+              const netDebt = Math.abs(debt1to2 - debt2to1);
+              
+              if (debt1to2 > debt2to1) {
+                // person1 still owes person2
+                debts[person1.id][person2.id] = netDebt;
+                debts[person2.id][person1.id] = 0;
+              } else {
+                // person2 still owes person1
+                debts[person2.id][person1.id] = netDebt;
+                debts[person1.id][person2.id] = 0;
+              }
+            }
+          }
+        });
+      });
+      
+      console.log("Simplified debts:", JSON.stringify(debts, null, 2));
+      
+      // Create settlement records from the debts
+      Object.entries(debts).forEach(([debtorId, creditors]) => {
+        Object.entries(creditors).forEach(([creditorId, amount]) => {
+          if (amount > 0.01) { // Only create settlements for non-zero amounts
+            const debtorName = friends.find(f => f.id === debtorId)?.name || "Unknown";
+            const creditorName = friends.find(f => f.id === creditorId)?.name || "Unknown";
+            
+            console.log(`Settlement: ${debtorName} pays ${creditorName} ${amount}`);
+            
+            settlements.push({
+              from: debtorId,
+              to: creditorId,
+              amount: amount
+            });
+          }
+        });
+      });
+      
       return settlements;
     } catch (error) {
-      console.error('Error calculating settlements:', error);
+      console.error("Error calculating settlements:", error);
       return [];
     }
-  }, [calculateBalances]);
+  }, [expenses, expenseParticipants, friends]);
 
   // Get a trip by ID
   const getTripById = useCallback(async (tripId) => {
+    if (!tripId) {
+      console.error("getTripById called with invalid tripId:", tripId);
+      return null; 
+    }
+    
     // Prevent duplicate calls
     const requestId = `getTripById_${tripId}`;
     if (pendingRequests.current[requestId]) {
@@ -547,38 +705,65 @@ export function ExpenseProvider({ children }) {
     const signal = controller.signal;
     
     try {
-      // Validate that tripId exists
-      if (!tripId) {
-        console.error("Missing trip ID");
-        return null;
+      // First check if we have the trip in our local state
+      const localTrip = trips.find(trip => trip.id === tripId);
+      if (localTrip) {
+        console.log("Found trip in local state:", localTrip);
+        
+        // Still fetch members to ensure we have the latest data
+        const { data: memberData, error: memberError } = await supabase
+          .from('trip_members')
+          .select('user_id')
+          .eq("trip_id", tripId)
+          .abortSignal(signal);
+        
+        if (memberError) {
+          console.error("Error getting trip members:", memberError.message);
+          // Continue without members
+        }
+        
+        if (signal.aborted) return null;
+        
+        // Add members to trip data if available
+        if (memberData && memberData.length > 0) {
+          localTrip.members = memberData.map(member => member.user_id);
+        } else {
+          localTrip.members = [];
+        }
+        
+        return localTrip;
       }
       
-      console.log("Fetching trip with ID (in store):", tripId);
-      
-      // First, get the trip details
+      // Fetch trip from database
       const { data: tripData, error: tripError } = await supabase
-        .from("trips")
-        .select("*")
-        .eq("id", tripId)
+        .from('trips')
+        .select('*')
+        .eq('id', tripId)
         .single()
         .abortSignal(signal);
       
       if (tripError) {
-        console.error("Error getting trip by ID:", tripError.message);
-        return null;
-      }
-      
-      if (!tripData) {
-        console.error("Trip not found for ID:", tripId);
-        return null;
+        if (tripError.code === 'PGRST116') {
+          // This is the "not found" error code from PostgREST
+          console.error(`Trip with ID ${tripId} not found in database`);
+          return null;
+        }
+        
+        console.error("Error fetching trip:", tripError.message);
+        return null; 
       }
       
       if (signal.aborted) return null;
       
-      // Next, get the trip members
+      if (!tripData) {
+        console.error(`Trip with ID ${tripId} not found`);
+        return null;
+      }
+      
+      // Fetch trip members
       const { data: memberData, error: memberError } = await supabase
-        .from("trip_members")
-        .select("user_id")
+        .from('trip_members')
+        .select('user_id')
         .eq("trip_id", tripId)
         .abortSignal(signal);
       
@@ -602,14 +787,11 @@ export function ExpenseProvider({ children }) {
       if (error.name !== 'AbortError') {
         console.error("Error fetching trip by ID:", error);
       }
-      return null;
+      return null; 
     } finally {
-      // Clean up
-      if (!signal.aborted) {
-        delete pendingRequests.current[requestId];
-      }
+      delete pendingRequests.current[requestId];
     }
-  }, []);
+  }, [trips]);
 
   // Get expenses for a specific trip
   const getExpensesByTrip = useCallback(async (tripId) => {
@@ -811,6 +993,265 @@ export function ExpenseProvider({ children }) {
     dataFetched.current = true;
   }, [fetchData]);
 
+  // Add a member to a trip
+  const addTripMember = useCallback(async (tripId, userId) => {
+    try {
+      // Validate inputs
+      if (!tripId || !userId) {
+        throw new Error("Trip ID and user ID are required");
+      }
+      
+      // Check if the user is already a member of the trip
+      const { data: existingMember, error: checkError } = await supabase
+        .from("trip_members")
+        .select("*")
+        .eq("trip_id", tripId)
+        .eq("user_id", userId)
+        .single();
+      
+      if (checkError && checkError.code !== "PGRST116") {
+        // PGRST116 is the error code for "no rows returned" which is expected if the member doesn't exist
+        console.error("Error checking existing trip member:", checkError);
+        throw new Error("Failed to check if user is already a member");
+      }
+      
+      if (existingMember) {
+        throw new Error("This friend is already a member of the trip");
+      }
+      
+      // Add the user to the trip
+      const { data, error } = await supabase
+        .from("trip_members")
+        .insert([
+          { trip_id: tripId, user_id: userId }
+        ]);
+      
+      if (error) {
+        console.error("Error adding trip member:", error);
+        throw new Error("Failed to add member to trip");
+      }
+      
+      // Force a refresh of the trip data
+      refreshDataOnce();
+      
+      return data;
+    } catch (error) {
+      console.error("Error in addTripMember:", error);
+      throw error;
+    }
+  }, [refreshDataOnce]);
+
+  // Remove a member from a trip
+  const removeTripMember = useCallback(async (tripId, userId) => {
+    try {
+      // Validate inputs
+      if (!tripId || !userId) {
+        throw new Error("Trip ID and user ID are required");
+      }
+      
+      // Check if the user has any expenses in this trip
+      const { data: userExpenses, error: expenseError } = await supabase
+        .from("expenses")
+        .select("id")
+        .eq("trip_id", tripId)
+        .eq("paid_by", userId);
+      
+      if (expenseError) {
+        console.error("Error checking user expenses:", expenseError);
+        throw new Error("Failed to check user expenses");
+      }
+      
+      if (userExpenses && userExpenses.length > 0) {
+        throw new Error("Cannot remove member with existing expenses");
+      }
+      
+      // Check if the user is a participant in any expenses
+      const { data: participations, error: participationError } = await supabase
+        .from("expense_participants")
+        .select("id, expense_id")
+        .eq("user_id", userId);
+      
+      if (participationError) {
+        console.error("Error checking user participations:", participationError);
+        throw new Error("Failed to check user participations");
+      }
+      
+      if (participations && participations.length > 0) {
+        // Get the expense IDs
+        const expenseIds = participations.map(p => p.expense_id);
+        
+        // Check if any of these expenses belong to this trip
+        const { data: tripExpenses, error: tripExpError } = await supabase
+          .from("expenses")
+          .select("id")
+          .eq("trip_id", tripId)
+          .in("id", expenseIds);
+        
+        if (tripExpError) {
+          console.error("Error checking trip expenses:", tripExpError);
+          throw new Error("Failed to check trip expenses");
+        }
+        
+        if (tripExpenses && tripExpenses.length > 0) {
+          throw new Error("Cannot remove member who is a participant in expenses");
+        }
+      }
+      
+      // Remove the user from the trip
+      const { data, error } = await supabase
+        .from("trip_members")
+        .delete()
+        .eq("trip_id", tripId)
+        .eq("user_id", userId);
+      
+      if (error) {
+        console.error("Error removing trip member:", error);
+        throw new Error("Failed to remove member from trip");
+      }
+      
+      // Force a refresh of the trip data
+      refreshDataOnce();
+      
+      return data;
+    } catch (error) {
+      console.error("Error in removeTripMember:", error);
+      throw error;
+    }
+  }, [refreshDataOnce]);
+
+  // Get members of a trip
+  const getTripMembers = useCallback(async (tripId) => {
+    try {
+      if (!tripId) {
+        console.error("Missing trip ID");
+        return [];
+      }
+      
+      const { data, error } = await supabase
+        .from("trip_members")
+        .select("user_id")
+        .eq("trip_id", tripId);
+      
+      if (error) {
+        console.error("Error getting trip members:", error);
+        return [];
+      }
+      
+      // Return the user IDs
+      return data.map(member => member.user_id);
+    } catch (error) {
+      console.error("Error in getTripMembers:", error);
+      return [];
+    }
+  }, []);
+
+  // Delete a friend
+  const deleteFriend = useCallback(async (friendId) => {
+    if (!friendId) {
+      throw new Error("Friend ID is required");
+    }
+    
+    const requestId = `deleteFriend_${friendId}`;
+    const controller = createAbortController(requestId);
+    const signal = controller.signal;
+    
+    try {
+      // Check if friend is part of any trips
+      const { data: tripMembers, error: tripMembersError } = await supabase
+        .from('trip_members')
+        .select('*')
+        .eq('user_id', friendId)
+        .abortSignal(signal);
+      
+      if (tripMembersError) {
+        console.error('Error checking trip members:', tripMembersError);
+        throw new Error(`Failed to check trip memberships: ${tripMembersError.message}`);
+      }
+      
+      if (tripMembers && tripMembers.length > 0) {
+        // Remove friend from all trips
+        const { error: removeError } = await supabase
+          .from('trip_members')
+          .delete()
+          .eq('user_id', friendId)
+          .abortSignal(signal);
+        
+        if (removeError) {
+          console.error('Error removing friend from trips:', removeError);
+          throw new Error(`Failed to remove friend from trips: ${removeError.message}`);
+        }
+      }
+      
+      // Check if friend has any expenses
+      const { data: paidExpenses, error: paidExpensesError } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('paid_by', friendId)
+        .abortSignal(signal);
+      
+      if (paidExpensesError) {
+        console.error('Error checking paid expenses:', paidExpensesError);
+        throw new Error(`Failed to check paid expenses: ${paidExpensesError.message}`);
+      }
+      
+      if (paidExpenses && paidExpenses.length > 0) {
+        throw new Error(`Cannot delete friend who has paid for ${paidExpenses.length} expenses. Please reassign or delete these expenses first.`);
+      }
+      
+      // Check if friend is a participant in any expenses
+      const { data: expenseParticipations, error: participationsError } = await supabase
+        .from('expense_participants')
+        .select('*')
+        .eq('user_id', friendId)
+        .abortSignal(signal);
+      
+      if (participationsError) {
+        console.error('Error checking expense participations:', participationsError);
+        throw new Error(`Failed to check expense participations: ${participationsError.message}`);
+      }
+      
+      if (expenseParticipations && expenseParticipations.length > 0) {
+        // Remove friend from all expense participations
+        const { error: removeParticipationsError } = await supabase
+          .from('expense_participants')
+          .delete()
+          .eq('user_id', friendId)
+          .abortSignal(signal);
+        
+        if (removeParticipationsError) {
+          console.error('Error removing friend from expense participations:', removeParticipationsError);
+          throw new Error(`Failed to remove friend from expense participations: ${removeParticipationsError.message}`);
+        }
+      }
+      
+      // Finally, delete the friend
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', friendId)
+        .abortSignal(signal);
+      
+      if (error) {
+        console.error('Error deleting friend:', error);
+        throw new Error(`Failed to delete friend: ${error.message}`);
+      }
+      
+      // Update local state
+      setFriends(prev => prev.filter(friend => friend.id !== friendId));
+      
+      return true;
+    } catch (err) {
+      // Only log error if not aborted
+      if (err.name !== 'AbortError') {
+        console.error('Error deleting friend:', err.message || JSON.stringify(err));
+        throw err;
+      }
+      return null;
+    } finally {
+      delete pendingRequests.current[requestId];
+    }
+  }, []);
+
   // Context value
   const contextValue = {
     friends,
@@ -829,8 +1270,14 @@ export function ExpenseProvider({ children }) {
     calculateBalances,
     calculateSettlements,
     addUser,
+    addFriend,
+    editFriend,
+    deleteFriend,
     fetchData,
-    refreshDataOnce
+    refreshDataOnce,
+    addTripMember,
+    removeTripMember,
+    getTripMembers
   };
 
   return (
