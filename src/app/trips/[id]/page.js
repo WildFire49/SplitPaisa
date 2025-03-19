@@ -214,7 +214,7 @@ function TripDetailsContent() {
       <div className="flex justify-center items-center min-h-[60vh]">
         <Card className="p-6 max-w-md w-full">
           <h2 className="text-xl font-semibold mb-2">Trip Not Found</h2>
-          <p className="text-gray-700 mb-4">The trip you're looking for doesn't exist or has been deleted.</p>
+          <p className="text-gray-700 mb-4">The trip you&apos;re looking for doesn&apos;t exist or has been deleted.</p>
           <Link href="/trips">
             <Button>Back to Trips</Button>
           </Link>

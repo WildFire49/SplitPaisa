@@ -1,0 +1,8 @@
+.git
+.github
+.next
+node_modules
+.env.local
+README.md
+setup-database.sql
+vercel-deployment-guide.md
