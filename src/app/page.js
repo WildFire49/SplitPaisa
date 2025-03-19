@@ -11,27 +11,54 @@ import { IndianRupee } from 'lucide-react';
 
 // Client component
 function HomeContent() {
-  const { trips, expenses, friends, calculateSettlements } = useExpenseStore();
+  const { trips, expenses, friends, calculateSettlements, fetchData } = useExpenseStore();
   const [settlements, setSettlements] = useState([]);
   const [recentTrips, setRecentTrips] = useState([]);
   const [recentExpenses, setRecentExpenses] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Calculate settlements
-    const calculatedSettlements = calculateSettlements();
-    setSettlements(calculatedSettlements);
-
-    // Get recent trips (last 3)
-    const sortedTrips = [...trips].sort((a, b) => 
-      new Date(b.date) - new Date(a.date)
-    ).slice(0, 3);
-    setRecentTrips(sortedTrips);
+    // Refresh data when component mounts
+    const refreshData = async () => {
+      setIsLoading(true);
+      try {
+        await fetchData();
+      } catch (error) {
+        console.error('Error refreshing data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
     
-    // Get recent expenses (last 5)
-    const sortedExpenses = [...expenses].sort((a, b) => 
-      new Date(b.date) - new Date(a.date)
-    ).slice(0, 5);
-    setRecentExpenses(sortedExpenses);
+    refreshData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (!trips || !expenses) return;
+    
+    try {
+      // Calculate settlements
+      const calculatedSettlements = calculateSettlements();
+      setSettlements(calculatedSettlements || []);
+
+      // Get recent trips (last 3)
+      if (trips && trips.length > 0) {
+        const sortedTrips = [...trips]
+          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+          .slice(0, 3);
+        setRecentTrips(sortedTrips);
+      }
+      
+      // Get recent expenses (last 5)
+      if (expenses && expenses.length > 0) {
+        const sortedExpenses = [...expenses]
+          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+          .slice(0, 5);
+        setRecentExpenses(sortedExpenses);
+      }
+    } catch (error) {
+      console.error('Error processing data in HomeContent:', error);
+    }
   }, [trips, expenses, calculateSettlements]);
 
   // Format currency

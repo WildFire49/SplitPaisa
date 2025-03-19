@@ -9,23 +9,25 @@ import { IndianRupee } from 'lucide-react';
 
 // Client component
 function DashboardContent() {
-  const { friends, expenses, calculateBalances, calculateSettlements } = useExpenseStore();
+  const { friends, expenses, calculateBalances, calculateSettlements, loading, error } = useExpenseStore();
   const [balances, setBalances] = useState({});
   const [settlements, setSettlements] = useState([]);
   const [totalAmount, setTotalAmount] = useState(0);
 
   useEffect(() => {
-    // Calculate balances and settlements
-    const calculatedBalances = calculateBalances();
-    setBalances(calculatedBalances);
-    
-    const calculatedSettlements = calculateSettlements();
-    setSettlements(calculatedSettlements);
-    
-    // Calculate total expenses
-    const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    setTotalAmount(total);
-  }, [expenses, calculateBalances, calculateSettlements]);
+    if (!loading && expenses.length > 0) {
+      // Calculate balances and settlements
+      const calculatedBalances = calculateBalances();
+      setBalances(calculatedBalances);
+      
+      const calculatedSettlements = calculateSettlements();
+      setSettlements(calculatedSettlements);
+      
+      // Calculate total expenses
+      const total = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+      setTotalAmount(total);
+    }
+  }, [expenses, calculateBalances, calculateSettlements, loading]);
 
   // Format currency
   const formatCurrency = (amount) => {
@@ -58,156 +60,149 @@ function DashboardContent() {
     hidden: { y: 20, opacity: 0 },
     visible: {
       y: 0,
-      opacity: 1
+      opacity: 1,
+      transition: {
+        type: 'spring',
+        stiffness: 100
+      }
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Card className="p-6 max-w-md w-full">
+          <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
+          <p className="text-gray-700">{error}</p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8">
-      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
-      
-      {/* Summary Cards */}
-      <motion.div 
-        className="grid grid-cols-1 md:grid-cols-3 gap-6"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
+    <motion.div 
+      className="container mx-auto px-4 py-8"
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+    >
+      <motion.h1 
+        className="text-3xl font-bold mb-8 text-center"
+        variants={itemVariants}
       >
-        <motion.div variants={itemVariants}>
-          <Card className="text-center p-6">
-            <div className="flex justify-center items-center mb-3">
-              <IndianRupee className="text-4xl text-primary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Total Expenses</h3>
-            <p className="text-3xl font-bold">{formatCurrency(totalAmount)}</p>
-          </Card>
-        </motion.div>
-        
-        <motion.div variants={itemVariants}>
-          <Card className="text-center p-6">
-            <div className="flex justify-center items-center mb-3">
-              <FaUserFriends className="text-4xl text-secondary" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Friends</h3>
-            <p className="text-3xl font-bold">{friends.length}</p>
-          </Card>
-        </motion.div>
-        
-        <motion.div variants={itemVariants}>
-          <Card className="text-center p-6">
-            <div className="text-4xl text-accent mx-auto mb-3">₹</div>
-            <h3 className="text-xl font-semibold mb-2">Settlements</h3>
-            <p className="text-3xl font-bold">{settlements.length}</p>
-          </Card>
-        </motion.div>
+        Dashboard
+      </motion.h1>
+
+      <motion.div 
+        className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10"
+        variants={itemVariants}
+      >
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <IndianRupee className="mr-2" size={20} />
+            Total Expenses
+          </h2>
+          <p className="text-3xl font-bold text-primary">
+            {formatCurrency(totalAmount)}
+          </p>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <FaUserFriends className="mr-2" size={20} />
+            Friends
+          </h2>
+          <p className="text-3xl font-bold text-primary">{friends.length}</p>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-2 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg>
+            Settlements
+          </h2>
+          <p className="text-3xl font-bold text-primary">{settlements.length}</p>
+        </Card>
       </motion.div>
-      
-      {/* Individual Balances */}
-      <section>
-        <h2 className="text-2xl font-bold mb-4">Individual Balances</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {friends.map(friend => {
-            const balance = balances[friend.id] || 0;
-            const isPositive = balance > 0;
-            const isNegative = balance < 0;
-            
-            return (
-              <motion.div
-                key={friend.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: friend.id * 0.1 }}
-              >
-                <Card 
-                  className={`p-4 ${
-                    isPositive 
-                      ? 'border-l-4 border-success' 
-                      : isNegative 
-                        ? 'border-l-4 border-error' 
-                        : ''
+
+      <motion.div variants={itemVariants}>
+        <h2 className="text-2xl font-semibold mb-4">Balances</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
+          {Object.entries(balances).map(([friendId, balance]) => (
+            <Card 
+              key={friendId} 
+              className={`p-4 ${balance > 0 ? 'border-green-400' : balance < 0 ? 'border-red-400' : 'border-gray-300'}`}
+            >
+              <div className="flex justify-between items-center">
+                <h3 className="font-semibold">{getFriendName(friendId)}</h3>
+                <span 
+                  className={`font-bold ${
+                    balance > 0 
+                      ? 'text-green-600' 
+                      : balance < 0 
+                        ? 'text-red-600' 
+                        : 'text-gray-600'
                   }`}
-                  elevation="medium"
                 >
-                  <h3 className="font-semibold text-lg mb-2">{friend.name}</h3>
-                  <div className={`text-xl font-bold flex items-center ${
-                    isPositive 
-                      ? 'lending' 
-                      : isNegative 
-                        ? 'borrowing' 
-                        : ''
-                  }`}>
-                    <IndianRupee className="h-5 w-5 mr-1" />
-                    {Math.abs(balance).toFixed(2)}
-                  </div>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {isPositive 
-                      ? 'will receive' 
-                      : isNegative 
-                        ? 'owes' 
-                        : 'settled up'}
-                  </p>
-                </Card>
-              </motion.div>
-            );
-          })}
+                  {formatCurrency(balance)}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                {balance > 0 
+                  ? 'is owed' 
+                  : balance < 0 
+                    ? 'owes' 
+                    : 'is settled up'}
+              </p>
+            </Card>
+          ))}
         </div>
-      </section>
-      
-      {/* Settlements */}
-      <section>
-        <h2 className="text-2xl font-bold mb-4">Settlements</h2>
-        
+      </motion.div>
+
+      <motion.div variants={itemVariants}>
+        <h2 className="text-2xl font-semibold mb-4">Suggested Settlements</h2>
         {settlements.length > 0 ? (
-          <motion.div 
-            className="space-y-4"
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-          >
+          <div className="grid grid-cols-1 gap-4">
             {settlements.map((settlement, index) => (
-              <motion.div key={index} variants={itemVariants}>
-                <Card className="p-4" elevation="medium">
-                  <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="text-center md:text-left">
-                      <p className="text-lg font-semibold">{getFriendName(settlement.from)}</p>
-                      <p className="text-sm text-gray-500">pays</p>
-                    </div>
-                    
-                    <div className="flex items-center">
-                      <div className="text-xl font-bold text-primary flex items-center">
-                        <IndianRupee className="h-5 w-5 mr-1" />
-                        {settlement.amount.toFixed(2)}
-                      </div>
-                      <FaArrowRight className="mx-2 text-gray-400" />
-                    </div>
-                    
-                    <div className="text-center md:text-right">
-                      <p className="text-lg font-semibold">{getFriendName(settlement.to)}</p>
-                      <p className="text-sm text-gray-500">receives</p>
-                    </div>
+              <Card key={index} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <span className="font-semibold">{getFriendName(settlement.from)}</span>
+                    <FaArrowRight className="mx-3 text-primary" />
+                    <span className="font-semibold">{getFriendName(settlement.to)}</span>
                   </div>
-                </Card>
-              </motion.div>
+                  <span className="font-bold">{formatCurrency(settlement.amount)}</span>
+                </div>
+              </Card>
             ))}
-          </motion.div>
+          </div>
         ) : (
-          <Card className="text-center p-8">
-            <p className="text-gray-500">Everyone is settled up! No payments needed.</p>
+          <Card className="p-6 text-center">
+            <p className="text-gray-600">Everyone is settled up! No payments needed.</p>
           </Card>
         )}
-      </section>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
 // Loading fallback component
 function DashboardLoading() {
   return (
-    <div className="space-y-8">
-      <Card className="p-6 text-center" elevation="medium">
-        <p>Loading dashboard data...</p>
-      </Card>
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
     </div>
   );
 }

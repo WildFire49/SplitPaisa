@@ -25,30 +25,55 @@ const ExpenseForm = ({ tripId }) => {
   
   const [errors, setErrors] = useState({});
   const [trip, setTrip] = useState(null);
+  const [tripMembers, setTripMembers] = useState([]);
 
   useEffect(() => {
-    if (tripId) {
-      const foundTrip = getTripById(parseInt(tripId));
-      setTrip(foundTrip);
-      setFormData(prev => ({
-        ...prev,
-        tripId: parseInt(tripId)
-      }));
-    }
-  }, [tripId, getTripById]);
+    const fetchTripData = async () => {
+      if (tripId) {
+        const foundTrip = await getTripById(tripId);
+        setTrip(foundTrip);
+        
+        if (foundTrip) {
+          // Set trip ID in form
+          setFormData(prev => ({
+            ...prev,
+            tripId: tripId // Use the UUID directly
+          }));
+          
+          // Get trip members
+          if (foundTrip.members && foundTrip.members.length > 0) {
+            // Filter friends to only include trip members
+            const memberDetails = friends.filter(friend => 
+              foundTrip.members.includes(friend.id)
+            );
+            setTripMembers(memberDetails);
+            
+            // By default, all trip members are participants
+            setFormData(prev => ({
+              ...prev,
+              participants: memberDetails.map(member => member.id)
+            }));
+          }
+        }
+      } else {
+        setFormData(prev => ({
+          ...prev,
+          tripId: ''
+        }));
+        setTripMembers(friends);
+      }
+    };
+    
+    fetchTripData();
+  }, [tripId, getTripById, friends]);
 
   const handleChange = (e) => {
     const { name, value, type } = e.target;
     
-    if (name === 'paidBy') {
+    if (name === 'paidBy' || name === 'tripId') {
       setFormData({
         ...formData,
-        paidBy: parseInt(value)
-      });
-    } else if (name === 'tripId') {
-      setFormData({
-        ...formData,
-        tripId: parseInt(value)
+        [name]: value // Use the UUID directly
       });
     } else if (name === 'amount') {
       // Only allow numeric input with up to 2 decimal places
@@ -142,6 +167,8 @@ const ExpenseForm = ({ tripId }) => {
       date: new Date().toISOString() // Add current date automatically
     };
     
+    console.log("Submitting expense data:", expenseData);
+    
     addExpense(expenseData);
     
     if (tripId) {
@@ -151,13 +178,13 @@ const ExpenseForm = ({ tripId }) => {
     }
   };
 
-  const friendOptions = friends.map(friend => ({
-    value: friend.id,
+  const friendOptions = tripMembers.map(friend => ({
+    value: friend.id, // Use the UUID directly
     label: friend.name
   }));
 
   const tripOptions = trips.map(trip => ({
-    value: trip.id,
+    value: trip.id, // Use the UUID directly
     label: trip.name
   }));
 
@@ -236,7 +263,7 @@ const ExpenseForm = ({ tripId }) => {
           
           <div className="bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-md p-3">
             <div className="grid grid-cols-2 gap-1">
-              {friends.map(friend => (
+              {tripMembers.map(friend => (
                 <Checkbox
                   key={friend.id}
                   id={`friend-${friend.id}`}
@@ -287,6 +314,7 @@ const ExpenseForm = ({ tripId }) => {
           <Button 
             type="submit"
             elevation="high"
+            
           >
             Add Expense
           </Button>
