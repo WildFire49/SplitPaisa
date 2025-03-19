@@ -341,12 +341,17 @@ export function ExpenseProvider({ children }) {
       
       if (!signal.aborted) {
         // Create expense participants
-        const participants = expense.participants.map(participantId => ({
-          id: uuidv4(),
-          expense_id: expenseId,
-          user_id: participantId,
-          share: expense.amount / expense.participants.length
-        }));
+        const participants = expense.participants.map(participantId => {
+          // Calculate the exact share for each participant without rounding
+          const exactShare = expense.amount / expense.participants.length;
+          
+          return {
+            id: uuidv4(),
+            expense_id: expenseId,
+            user_id: participantId,
+            share: exactShare
+          };
+        });
         
         console.log("Adding expense participants:", participants);
         
@@ -532,28 +537,52 @@ export function ExpenseProvider({ children }) {
 
     // Calculate net balance for each friend
     expenses.forEach(expense => {
-      // Add amount to payer's balance (they are owed this money)
-      if (expense.paid_by) {
-        const friendName = friends.find(f => f.id === expense.paid_by)?.name || "Unknown";
-        balances[expense.paid_by] = (balances[expense.paid_by] || 0) + parseFloat(expense.amount);
-        console.log(`After payer ${expense.paid_by} (${friendName}) added ${expense.amount} for expense "${expense.description}":`, {...balances});
-      }
-      
       // Find participants for this expense
       const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
       console.log(`Participants for expense "${expense.description}":`, participants);
       
-      // Distribute expense among participants
-      if (participants && participants.length > 0) {
-        participants.forEach(participant => {
-          // Subtract share amount from each participant's balance (they owe this money)
-          if (participant.user_id) {
-            const friendName = friends.find(f => f.id === participant.user_id)?.name || "Unknown";
-            balances[participant.user_id] = (balances[participant.user_id] || 0) - parseFloat(participant.share);
-            console.log(`After participant ${participant.user_id} (${friendName}) subtracted ${participant.share}:`, {...balances});
-          }
-        });
+      if (!participants || participants.length === 0) {
+        console.log(`No participants found for expense "${expense.description}"`);
+        return; // Skip this expense
       }
+      
+      // Calculate total shares for verification
+      const totalShares = participants.reduce((sum, p) => sum + parseFloat(p.share), 0);
+      console.log(`Total shares for expense "${expense.description}": ${totalShares}, Expense amount: ${expense.amount}`);
+      
+      // Verify that total shares match the expense amount (within a small tolerance for floating point errors)
+      if (Math.abs(totalShares - parseFloat(expense.amount)) > 0.01) {
+        console.warn(`Warning: Total shares (${totalShares}) don't match expense amount (${expense.amount}) for "${expense.description}"`);
+      }
+      
+      // Add amount to payer's balance (they are owed this money)
+      if (expense.paid_by) {
+        const friendName = friends.find(f => f.id === expense.paid_by)?.name || "Unknown";
+        
+        // The payer paid the full amount
+        const fullAmount = parseFloat(expense.amount);
+        
+        // Find the payer's own share
+        const payerParticipant = participants.find(p => p.user_id === expense.paid_by);
+        const payerOwnShare = payerParticipant ? parseFloat(payerParticipant.share) : 0;
+        
+        // The payer is owed the amount they paid for others
+        const paidForOthers = fullAmount - payerOwnShare;
+        
+        balances[expense.paid_by] = (balances[expense.paid_by] || 0) + paidForOthers;
+        console.log(`After payer ${expense.paid_by} (${friendName}) added ${paidForOthers} for expense "${expense.description}":`, {...balances});
+      }
+      
+      // Distribute expense among participants (excluding the payer)
+      participants.forEach(participant => {
+        // Skip the payer as we've already handled their balance
+        if (participant.user_id && participant.user_id !== expense.paid_by) {
+          const friendName = friends.find(f => f.id === participant.user_id)?.name || "Unknown";
+          const share = parseFloat(participant.share); // Use exact share without rounding
+          balances[participant.user_id] = (balances[participant.user_id] || 0) - share;
+          console.log(`After participant ${participant.user_id} (${friendName}) subtracted ${share}:`, {...balances});
+        }
+      });
     });
 
     console.log("Final balances in store:", balances);
@@ -563,96 +592,103 @@ export function ExpenseProvider({ children }) {
   // Calculate who owes whom
   const calculateSettlements = useCallback(() => {
     try {
-      const balances = calculateBalances();
       const settlements = [];
-
-      // Ensure we have balances to work with
-      if (!balances || Object.keys(balances).length === 0) {
-        console.log("No balances to calculate settlements from");
-        return [];
-      }
-
-      console.log("Balances for settlement calculation:", balances);
-
-      // Create arrays of creditors (positive balance) and debtors (negative balance)
-      const creditors = Object.entries(balances)
-        .filter(([id, balance]) => balance > 0 && id)
-        .map(([id, balance]) => ({ id, balance }))
-        .sort((a, b) => b.balance - a.balance);
-
-      const debtors = Object.entries(balances)
-        .filter(([id, balance]) => balance < 0 && id)
-        .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
-        .sort((a, b) => b.balance - a.balance);
-
-      console.log("Creditors (positive balance):", creditors.map(c => ({
-        name: friends.find(f => f.id === c.id)?.name || "Unknown",
-        ...c
-      })));
-      console.log("Debtors (negative balance):", debtors.map(d => ({
-        name: friends.find(f => f.id === d.id)?.name || "Unknown",
-        ...d
-      })));
-
-      // Match debtors with creditors to settle debts
-      while (debtors.length > 0 && creditors.length > 0) {
-        const debtor = debtors[0];
-        const creditor = creditors[0];
+      
+      // Create a map to track who owes what to whom
+      const debts = {};
+      
+      // Initialize the debt tracking structure
+      friends.forEach(debtor => {
+        debts[debtor.id] = {};
+        friends.forEach(creditor => {
+          if (debtor.id !== creditor.id) {
+            debts[debtor.id][creditor.id] = 0;
+          }
+        });
+      });
+      
+      // Process each expense to determine who owes what to whom
+      expenses.forEach(expense => {
+        const payer = expense.paid_by;
+        if (!payer) return;
         
-        const debtorName = friends.find(f => f.id === debtor.id)?.name || "Unknown";
-        const creditorName = friends.find(f => f.id === creditor.id)?.name || "Unknown";
+        // Get participants for this expense
+        const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
+        if (!participants || participants.length === 0) return;
         
-        // Find the minimum of what's owed and what's due
-        const amount = Math.min(debtor.balance, creditor.balance);
-        
-        console.log(`Comparing debtor ${debtorName} (${debtor.balance}) with creditor ${creditorName} (${creditor.balance}), min amount: ${amount}`);
-        
-        if (amount > 0) {
-          // Create a settlement record
-          settlements.push({
-            from: debtor.id,
-            to: creditor.id,
-            amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
-          });
-          
-          console.log(`Settlement created: ${debtorName} pays ${creditorName} ${amount}`);
-          
-          // Update balances
-          debtor.balance -= amount;
-          creditor.balance -= amount;
-          
-          console.log(`After settlement - Debtor ${debtorName} balance: ${debtor.balance}, Creditor ${creditorName} balance: ${creditor.balance}`);
-        }
-        
-        // Remove entries with zero balance
-        if (debtor.balance < 0.01) {
-          console.log(`Removing debtor ${debtorName} with remaining balance ${debtor.balance}`);
-          debtors.shift();
-        }
-        if (creditor.balance < 0.01) {
-          console.log(`Removing creditor ${creditorName} with remaining balance ${creditor.balance}`);
-          creditors.shift();
-        }
-      }
-
-      console.log("Final settlements:", settlements.map(s => ({
-        from: friends.find(f => f.id === s.from)?.name || "Unknown",
-        to: friends.find(f => f.id === s.to)?.name || "Unknown",
-        amount: s.amount
-      })));
+        // Calculate each participant's debt to the payer
+        participants.forEach(participant => {
+          if (participant.user_id && participant.user_id !== payer) {
+            const share = parseFloat(participant.share);
+            
+            // Add to the debt that this participant owes to the payer
+            if (debts[participant.user_id] && debts[participant.user_id][payer] !== undefined) {
+              debts[participant.user_id][payer] += share;
+            }
+          }
+        });
+      });
+      
+      console.log("Raw debts:", JSON.stringify(debts, null, 2));
+      
+      // Simplify debts (if A owes B and B owes A, cancel out the common amount)
+      friends.forEach(person1 => {
+        friends.forEach(person2 => {
+          if (person1.id !== person2.id) {
+            // If both owe each other, cancel out the common amount
+            const debt1to2 = debts[person1.id][person2.id] || 0;
+            const debt2to1 = debts[person2.id][person1.id] || 0;
+            
+            if (debt1to2 > 0 && debt2to1 > 0) {
+              // Calculate the net debt
+              const netDebt = Math.abs(debt1to2 - debt2to1);
+              
+              if (debt1to2 > debt2to1) {
+                // person1 still owes person2
+                debts[person1.id][person2.id] = netDebt;
+                debts[person2.id][person1.id] = 0;
+              } else {
+                // person2 still owes person1
+                debts[person2.id][person1.id] = netDebt;
+                debts[person1.id][person2.id] = 0;
+              }
+            }
+          }
+        });
+      });
+      
+      console.log("Simplified debts:", JSON.stringify(debts, null, 2));
+      
+      // Create settlement records from the debts
+      Object.entries(debts).forEach(([debtorId, creditors]) => {
+        Object.entries(creditors).forEach(([creditorId, amount]) => {
+          if (amount > 0.01) { // Only create settlements for non-zero amounts
+            const debtorName = friends.find(f => f.id === debtorId)?.name || "Unknown";
+            const creditorName = friends.find(f => f.id === creditorId)?.name || "Unknown";
+            
+            console.log(`Settlement: ${debtorName} pays ${creditorName} ${amount}`);
+            
+            settlements.push({
+              from: debtorId,
+              to: creditorId,
+              amount: amount
+            });
+          }
+        });
+      });
       
       return settlements;
     } catch (error) {
-      console.error('Error calculating settlements:', error);
+      console.error("Error calculating settlements:", error);
       return [];
     }
-  }, [calculateBalances, friends]);
+  }, [expenses, expenseParticipants, friends]);
 
   // Get a trip by ID
   const getTripById = useCallback(async (tripId) => {
     if (!tripId) {
       console.error("getTripById called with invalid tripId:", tripId);
-      throw new Error("Trip ID is required");
+      return null; 
     }
     
     // Prevent duplicate calls
@@ -714,7 +750,7 @@ export function ExpenseProvider({ children }) {
         }
         
         console.error("Error fetching trip:", tripError.message);
-        throw new Error(`Failed to fetch trip: ${tripError.message}`);
+        return null; 
       }
       
       if (signal.aborted) return null;
@@ -750,14 +786,10 @@ export function ExpenseProvider({ children }) {
       // Only log error if not aborted
       if (error.name !== 'AbortError') {
         console.error("Error fetching trip by ID:", error);
-        throw error;
       }
-      return null;
+      return null; 
     } finally {
-      // Clean up
-      if (!signal.aborted) {
-        delete pendingRequests.current[requestId];
-      }
+      delete pendingRequests.current[requestId];
     }
   }, [trips]);
 

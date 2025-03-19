@@ -37,15 +37,18 @@ function ExpensePageContent() {
             setLoadError(null);
           } else {
             console.error("Trip not found for ID:", rawTripId);
-            setLoadError("Trip not found");
+            setLoadError(`Trip not found. Please check if the trip with ID ${rawTripId} exists.`);
+            // Keep the tripId so the user can still go back
           }
         } else {
           // No trip ID in URL, this is a new expense without a trip
+          setTripId(null);
           setLoadError(null);
         }
       } catch (err) {
         console.error("Error loading trip data:", err);
         setLoadError("Failed to load trip data. Please try again.");
+        // Keep the tripId if we have it so the user can still go back
       } finally {
         setIsLoading(false);
       }
@@ -66,14 +69,19 @@ function ExpensePageContent() {
 
   if (error || loadError) {
     return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <Card className="p-6 max-w-md w-full">
+      <div className="container mx-auto px-4 py-8">
+        <Card className="p-6 max-w-md w-full mx-auto">
           <h2 className="text-xl font-semibold text-red-500 mb-2">Error</h2>
-          <p className="text-gray-700">{error || loadError}</p>
-          <div className="mt-4">
+          <p className="text-gray-700 mb-4">{error || loadError}</p>
+          <div className="flex gap-4">
             <Link href="/trips">
               <Button>Back to Trips</Button>
             </Link>
+            {tripId && (
+              <Link href={`/trips/${tripId}`}>
+                <Button variant="secondary">Try Again</Button>
+              </Link>
+            )}
           </div>
         </Card>
       </div>

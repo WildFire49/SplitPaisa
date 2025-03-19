@@ -51,94 +51,120 @@ function TripDetailsContent() {
 
   // Calculate settlements specific to this trip
   const calculateTripSettlements = useCallback((tripExpenses) => {
-    // Initialize balances for all friends
-    const balances = {};
-    friends.forEach(friend => {
-      balances[friend.id] = 0;
-    });
+    try {
+      // Initialize balances for all friends
+      const balances = {};
+      friends.forEach(friend => {
+        balances[friend.id] = 0;
+      });
 
-    console.log("Initial balances:", balances);
-    console.log("Trip expenses:", tripExpenses);
+      console.log("Initial balances:", balances);
+      console.log("Trip expenses:", tripExpenses);
 
-    // Calculate net balance for each friend based on trip expenses only
-    tripExpenses.forEach(expense => {
-      // Add amount to payer's balance (they are owed this money)
-      balances[expense.paid_by] += parseFloat(expense.amount);
-      console.log(`After payer ${expense.paid_by} (${getFriendById(expense.paid_by)?.name}) added ${expense.amount}:`, {...balances});
+      // Create a map to track who owes what to whom
+      const debts = {};
       
-      // Distribute expense among participants
-      console.log(`Expense participants for ${expense.description}:`, expense.expense_participants);
+      // Initialize the debt tracking structure
+      friends.forEach(debtor => {
+        debts[debtor.id] = {};
+        friends.forEach(creditor => {
+          if (debtor.id !== creditor.id) {
+            debts[debtor.id][creditor.id] = 0;
+          }
+        });
+      });
       
-      // Check if expense_participants exists and is an array
-      if (!expense.expense_participants || !Array.isArray(expense.expense_participants)) {
-        console.error(`Missing or invalid expense_participants for expense ${expense.id} (${expense.description})`);
-        return;
-      }
-      
-      expense.expense_participants.forEach(participant => {
-        // Subtract share amount from each participant's balance (they owe this money)
-        if (!participant.user_id) {
-          console.error(`Missing user_id for participant in expense ${expense.id}`);
+      // Process each expense to determine who owes what to whom
+      tripExpenses.forEach(expense => {
+        const payer = expense.paid_by;
+        if (!payer) return;
+        
+        // Get participants for this expense
+        const participants = expense.expense_participants;
+        if (!participants || !Array.isArray(participants) || participants.length === 0) {
+          console.error(`Missing or invalid expense_participants for expense ${expense.id} (${expense.description})`);
           return;
         }
         
-        balances[participant.user_id] -= parseFloat(participant.share);
-        console.log(`After participant ${participant.user_id} (${getFriendById(participant.user_id)?.name}) subtracted ${participant.share}:`, {...balances});
-      });
-    });
-
-    console.log("Final balances:", balances);
-    setTripBalances(balances);
-
-    // Calculate settlements using the same algorithm as in expenseStore
-    const settlements = [];
-
-    // Create arrays of creditors (positive balance) and debtors (negative balance)
-    const creditors = Object.entries(balances)
-      .filter(([_, balance]) => balance > 0)
-      .map(([id, balance]) => ({ id, balance }))
-      .sort((a, b) => b.balance - a.balance);
-
-    const debtors = Object.entries(balances)
-      .filter(([_, balance]) => balance < 0)
-      .map(([id, balance]) => ({ id, balance: Math.abs(balance) }))
-      .sort((a, b) => b.balance - a.balance);
-
-    console.log("Creditors:", creditors);
-    console.log("Debtors:", debtors);
-
-    // Match debtors with creditors to settle debts
-    while (debtors.length > 0 && creditors.length > 0) {
-      const debtor = debtors[0];
-      const creditor = creditors[0];
-      
-      // Find the minimum of what's owed and what's due
-      const amount = Math.min(debtor.balance, creditor.balance);
-      
-      if (amount > 0) {
-        // Create a settlement record
-        settlements.push({
-          from: debtor.id,
-          to: creditor.id,
-          amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+        // Calculate each participant's debt to the payer
+        participants.forEach(participant => {
+          if (participant.user_id && participant.user_id !== payer) {
+            const share = parseFloat(participant.share);
+            
+            // Add to the debt that this participant owes to the payer
+            if (debts[participant.user_id] && debts[participant.user_id][payer] !== undefined) {
+              debts[participant.user_id][payer] += share;
+            }
+            
+            // Update balances for UI display
+            balances[participant.user_id] = (balances[participant.user_id] || 0) - share;
+          }
         });
         
-        console.log(`Settlement: ${getFriendById(debtor.id)?.name} pays ${getFriendById(creditor.id)?.name} ${amount}`);
-        
-        // Update balances
-        debtor.balance -= amount;
-        creditor.balance -= amount;
-        
-        console.log(`After settlement - Debtor balance: ${debtor.balance}, Creditor balance: ${creditor.balance}`);
-      }
+        // Update the payer's balance
+        const payerShare = participants.find(p => p.user_id === payer)?.share || 0;
+        const paidForOthers = parseFloat(expense.amount) - parseFloat(payerShare);
+        balances[payer] = (balances[payer] || 0) + paidForOthers;
+      });
       
-      // Remove entries with zero balance
-      if (debtor.balance < 0.01) debtors.shift();
-      if (creditor.balance < 0.01) creditors.shift();
+      console.log("Final balances:", balances);
+      setTripBalances(balances);
+      
+      console.log("Raw debts:", JSON.stringify(debts, null, 2));
+      
+      // Simplify debts (if A owes B and B owes A, cancel out the common amount)
+      friends.forEach(person1 => {
+        friends.forEach(person2 => {
+          if (person1.id !== person2.id) {
+            // If both owe each other, cancel out the common amount
+            const debt1to2 = debts[person1.id][person2.id] || 0;
+            const debt2to1 = debts[person2.id][person1.id] || 0;
+            
+            if (debt1to2 > 0 && debt2to1 > 0) {
+              // Calculate the net debt
+              const netDebt = Math.abs(debt1to2 - debt2to1);
+              
+              if (debt1to2 > debt2to1) {
+                // person1 still owes person2
+                debts[person1.id][person2.id] = netDebt;
+                debts[person2.id][person1.id] = 0;
+              } else {
+                // person2 still owes person1
+                debts[person2.id][person1.id] = netDebt;
+                debts[person1.id][person2.id] = 0;
+              }
+            }
+          }
+        });
+      });
+      
+      console.log("Simplified debts:", JSON.stringify(debts, null, 2));
+      
+      // Create settlement records from the debts
+      const settlements = [];
+      Object.entries(debts).forEach(([debtorId, creditors]) => {
+        Object.entries(creditors).forEach(([creditorId, amount]) => {
+          if (amount > 0.01) { // Only create settlements for non-zero amounts
+            const debtorName = getFriendById(debtorId)?.name || "Unknown";
+            const creditorName = getFriendById(creditorId)?.name || "Unknown";
+            
+            console.log(`Settlement: ${debtorName} pays ${creditorName} ${amount}`);
+            
+            settlements.push({
+              from: debtorId,
+              to: creditorId,
+              amount: amount
+            });
+          }
+        });
+      });
+      
+      console.log("Final settlements:", settlements);
+      setTripSettlements(settlements);
+    } catch (error) {
+      console.error("Error calculating trip settlements:", error);
+      setTripSettlements([]);
     }
-
-    console.log("Final settlements:", settlements);
-    setTripSettlements(settlements);
   }, [friends, getFriendById]);
 
   useEffect(() => {
