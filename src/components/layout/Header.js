@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { FaWallet, FaHome, FaPlus, FaChartBar, FaMoneyBillWave, FaUserCircle } from 'react-icons/fa';
+import { FaWallet, FaHome, FaPlus, FaChartBar, FaMoneyBillWave, FaUserCircle, FaUserFriends } from 'react-icons/fa';
 
 const Header = () => {
   const pathname = usePathname();
@@ -14,6 +14,7 @@ const Header = () => {
     { name: 'Home', path: '/', icon: <FaHome className="text-lg" /> },
     { name: 'Dashboard', path: '/dashboard', icon: <FaChartBar className="text-lg" /> },
     { name: 'Trips', path: '/trips', icon: <FaWallet className="text-lg" /> },
+    { name: 'Friends', path: '/friends', icon: <FaUserFriends className="text-lg" /> },
     { name: 'Add Trip', path: '/trips/new', icon: <FaPlus className="text-lg" /> },
     { name: 'Add Expense', path: '/expenses/new', icon: <FaMoneyBillWave className="text-lg" /> },
   ];
