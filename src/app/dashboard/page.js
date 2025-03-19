@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { motion } from 'framer-motion';
-import { FaRupeeSign, FaArrowRight, FaUserFriends } from 'react-icons/fa';
+import { FaArrowRight, FaUserFriends } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
 import Card from '@/components/ui/Card';
+import { IndianRupee } from 'lucide-react';
 
-export default function DashboardPage() {
+// Client component
+function DashboardContent() {
   const { friends, expenses, calculateBalances, calculateSettlements } = useExpenseStore();
   const [balances, setBalances] = useState({});
   const [settlements, setSettlements] = useState([]);
@@ -20,7 +22,7 @@ export default function DashboardPage() {
     const calculatedSettlements = calculateSettlements();
     setSettlements(calculatedSettlements);
     
-    // Calculate total amount of all expenses
+    // Calculate total expenses
     const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
     setTotalAmount(total);
   }, [expenses, calculateBalances, calculateSettlements]);
@@ -73,7 +75,9 @@ export default function DashboardPage() {
       >
         <motion.div variants={itemVariants}>
           <Card className="text-center p-6">
-            <FaRupeeSign className="text-4xl text-primary mx-auto mb-3" />
+            <div className="flex justify-center items-center mb-3">
+              <IndianRupee className="text-4xl text-primary" />
+            </div>
             <h3 className="text-xl font-semibold mb-2">Total Expenses</h3>
             <p className="text-3xl font-bold">{formatCurrency(totalAmount)}</p>
           </Card>
@@ -81,7 +85,9 @@ export default function DashboardPage() {
         
         <motion.div variants={itemVariants}>
           <Card className="text-center p-6">
-            <FaUserFriends className="text-4xl text-secondary mx-auto mb-3" />
+            <div className="flex justify-center items-center mb-3">
+              <FaUserFriends className="text-4xl text-secondary" />
+            </div>
             <h3 className="text-xl font-semibold mb-2">Friends</h3>
             <p className="text-3xl font-bold">{friends.length}</p>
           </Card>
@@ -107,34 +113,42 @@ export default function DashboardPage() {
             const isNegative = balance < 0;
             
             return (
-              <Card 
-                key={friend.id} 
-                className={`p-4 ${
-                  isPositive 
-                    ? 'border-l-4 border-success' 
-                    : isNegative 
-                      ? 'border-l-4 border-error' 
-                      : ''
-                }`}
+              <motion.div
+                key={friend.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: friend.id * 0.1 }}
               >
-                <h3 className="font-semibold text-lg mb-2">{friend.name}</h3>
-                <p className={`text-xl font-bold ${
-                  isPositive 
-                    ? 'lending' 
-                    : isNegative 
-                      ? 'borrowing' 
-                      : ''
-                }`}>
-                  {formatCurrency(balance)}
-                </p>
-                <p className="text-sm text-gray-500 mt-1">
-                  {isPositive 
-                    ? 'will receive' 
-                    : isNegative 
-                      ? 'owes' 
-                      : 'settled up'}
-                </p>
-              </Card>
+                <Card 
+                  className={`p-4 ${
+                    isPositive 
+                      ? 'border-l-4 border-success' 
+                      : isNegative 
+                        ? 'border-l-4 border-error' 
+                        : ''
+                  }`}
+                  elevation="medium"
+                >
+                  <h3 className="font-semibold text-lg mb-2">{friend.name}</h3>
+                  <div className={`text-xl font-bold flex items-center ${
+                    isPositive 
+                      ? 'lending' 
+                      : isNegative 
+                        ? 'borrowing' 
+                        : ''
+                  }`}>
+                    <IndianRupee className="h-5 w-5 mr-1" />
+                    {Math.abs(balance).toFixed(2)}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {isPositive 
+                      ? 'will receive' 
+                      : isNegative 
+                        ? 'owes' 
+                        : 'settled up'}
+                  </p>
+                </Card>
+              </motion.div>
             );
           })}
         </div>
@@ -153,7 +167,7 @@ export default function DashboardPage() {
           >
             {settlements.map((settlement, index) => (
               <motion.div key={index} variants={itemVariants}>
-                <Card className="p-4">
+                <Card className="p-4" elevation="medium">
                   <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="text-center md:text-left">
                       <p className="text-lg font-semibold">{getFriendName(settlement.from)}</p>
@@ -161,10 +175,11 @@ export default function DashboardPage() {
                     </div>
                     
                     <div className="flex items-center">
-                      <div className="text-xl font-bold text-primary">
-                        {formatCurrency(settlement.amount)}
+                      <div className="text-xl font-bold text-primary flex items-center">
+                        <IndianRupee className="h-5 w-5 mr-1" />
+                        {settlement.amount.toFixed(2)}
                       </div>
-                      <FaArrowRight className="mx-4 text-gray-400" />
+                      <FaArrowRight className="mx-2 text-gray-400" />
                     </div>
                     
                     <div className="text-center md:text-right">
@@ -183,5 +198,24 @@ export default function DashboardPage() {
         )}
       </section>
     </div>
+  );
+}
+
+// Loading fallback component
+function DashboardLoading() {
+  return (
+    <div className="space-y-8">
+      <Card className="p-6 text-center" elevation="medium">
+        <p>Loading dashboard data...</p>
+      </Card>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardContent />
+    </Suspense>
   );
 }

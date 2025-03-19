@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -10,7 +10,8 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { ArrowRight, IndianRupee } from 'lucide-react';
 
-export default function TripDetailsPage() {
+// Client component that uses useParams
+function TripDetailsContent() {
   const params = useParams();
   const router = useRouter();
   const tripId = parseInt(params.id);
@@ -97,7 +98,7 @@ export default function TripDetailsPage() {
     }
 
     setTripSettlements(settlements);
-  }, [friends, setTripBalances, setTripSettlements]);
+  }, [friends]);
 
   useEffect(() => {
     const tripData = getTripById(tripId);
@@ -385,12 +386,25 @@ export default function TripDetailsPage() {
           </Card>
         )}
       </div>
-      
-      <div className="flex justify-center mt-8">
-        <Link href="/trips">
-          <Button variant="outline">Back to Trips</Button>
-        </Link>
-      </div>
     </div>
+  );
+}
+
+// Loading fallback component
+function TripDetailsLoading() {
+  return (
+    <div className="space-y-8">
+      <Card className="p-6 text-center" elevation="medium">
+        <p>Loading trip details...</p>
+      </Card>
+    </div>
+  );
+}
+
+export default function TripDetailsPage() {
+  return (
+    <Suspense fallback={<TripDetailsLoading />}>
+      <TripDetailsContent />
+    </Suspense>
   );
 }
