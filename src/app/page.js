@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight, FaExchangeAlt } from 'react-icons/fa';
+import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight, FaExchangeAlt, FaMagic } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -11,8 +11,9 @@ import { IndianRupee } from 'lucide-react';
 
 // Client component
 function HomeContent() {
-  const { trips, expenses, friends, calculateSettlements, fetchData } = useExpenseStore();
+  const { trips, expenses, friends, calculateSettlements, calculateSmartSettlements, fetchData } = useExpenseStore();
   const [settlements, setSettlements] = useState([]);
+  const [smartSettlements, setSmartSettlements] = useState([]);
   const [recentTrips, setRecentTrips] = useState([]);
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +63,10 @@ function HomeContent() {
       // Calculate settlements
       const calculatedSettlements = calculateSettlements();
       setSettlements(calculatedSettlements || []);
+      
+      // Calculate smart settlements
+      const calculatedSmartSettlements = calculateSmartSettlements();
+      setSmartSettlements(calculatedSmartSettlements || []);
 
       // Get recent trips (last 3)
       if (trips && trips.length > 0) {
@@ -81,7 +86,7 @@ function HomeContent() {
     } catch (error) {
       console.error('Error processing data in HomeContent:', error);
     }
-  }, [trips, expenses, calculateSettlements]);
+  }, [trips, expenses, calculateSettlements, calculateSmartSettlements]);
 
   // Format currency
   const formatCurrency = (amount) => {
@@ -113,8 +118,17 @@ function HomeContent() {
     return settlements.filter(s => s.from === friendId || s.to === friendId);
   };
 
+  // Get smart settlements for a specific friend
+  const getSmartSettlementsForFriend = (friendId) => {
+    // Get smart settlements where this friend is either paying or receiving
+    return smartSettlements.filter(s => s.from === friendId || s.to === friendId);
+  };
+
   // State for the active tab in settlements
   const [activeSettlementTab, setActiveSettlementTab] = useState('all');
+  
+  // State for settlement type (regular or smart)
+  const [settlementType, setSettlementType] = useState('regular');
 
   return (
     <div className="space-y-8">
@@ -252,13 +266,41 @@ function HomeContent() {
           </Link>
         </div>
         
-        {settlements.length > 0 ? (
+        {(settlements.length > 0 || smartSettlements.length > 0) ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="bg-gradient-to-br from-gray-50/50 to-gray-100/50 dark:from-gray-800/50 dark:to-gray-900/50 p-6 rounded-2xl shadow-lg backdrop-blur-sm border border-gray-200/50 dark:border-gray-700/50"
           >
+            {/* Settlement type selector */}
+            <div className="mb-6 flex justify-center">
+              <div className="inline-flex rounded-md shadow-sm p-1 bg-gray-100 dark:bg-gray-800">
+                <button
+                  onClick={() => setSettlementType('regular')}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ${
+                    settlementType === 'regular'
+                      ? 'bg-white dark:bg-gray-700 shadow-sm text-primary'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <FaExchangeAlt className="inline mr-2" size={14} />
+                  Regular Settlements
+                </button>
+                <button
+                  onClick={() => setSettlementType('smart')}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ${
+                    settlementType === 'smart'
+                      ? 'bg-white dark:bg-gray-700 shadow-sm text-primary'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <FaMagic className="inline mr-2" size={14} />
+                  Smart Settlements
+                </button>
+              </div>
+            </div>
+            
             {/* Tabs for settlements */}
             <div className="mb-6 border-b border-gray-200/50 dark:border-gray-700/50 pb-1 overflow-x-auto hide-scrollbar">
               <ul className="flex flex-nowrap text-sm font-medium text-center">
@@ -297,10 +339,10 @@ function HomeContent() {
               </ul>
             </div>
             
-            {/* Settlement content based on active tab */}
+            {/* Settlement content based on active tab and settlement type */}
             <AnimatePresence mode="wait">
               <motion.div 
-                key={activeSettlementTab}
+                key={`${activeSettlementTab}-${settlementType}`}
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
@@ -309,146 +351,305 @@ function HomeContent() {
               >
                 {activeSettlementTab === 'all' ? (
                   // Show all settlements (limited to 4)
-                  settlements.slice(0, 4).map((settlement, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: index * 0.1 }}
-                    >
-                      <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-purple-500"></div>
-                        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                          <div className="text-center sm:text-left">
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                              {getFriendName(settlement.from).charAt(0)}
+                  settlementType === 'regular' ? (
+                    // Regular settlements
+                    settlements.slice(0, 4).map((settlement, index) => (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: index * 0.1 }}
+                      >
+                        <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-purple-500"></div>
+                          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                            <div className="text-center sm:text-left">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                {getFriendName(settlement.from).charAt(0)}
+                              </div>
+                              <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                              <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                <span className="mr-1">pays</span>
+                                <FaArrowRight size={10} className="text-gray-400" />
+                              </p>
                             </div>
-                            <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
-                            <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
-                              <span className="mr-1">pays</span>
-                              <FaArrowRight size={10} className="text-gray-400" />
-                            </p>
-                          </div>
-                          
-                          <div className="text-xl font-bold text-primary bg-primary/10 px-4 py-2 rounded-full flex items-center shadow-inner">
-                            <IndianRupee className="h-5 w-5 mr-1" />
-                            {settlement.amount.toFixed(2)}
-                          </div>
-                          
-                          <div className="text-center sm:text-right">
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                              {getFriendName(settlement.to).charAt(0)}
+                            
+                            <div className="text-xl font-bold text-primary bg-primary/10 px-4 py-2 rounded-full flex items-center shadow-inner">
+                              <IndianRupee className="h-5 w-5 mr-1" />
+                              {settlement.amount.toFixed(2)}
                             </div>
-                            <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
-                            <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
-                              <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
-                              <span>receives</span>
-                            </p>
+                            
+                            <div className="text-center sm:text-right">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                {getFriendName(settlement.to).charAt(0)}
+                              </div>
+                              <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                              <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                <span>receives</span>
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  ))
+                        </Card>
+                      </motion.div>
+                    ))
+                  ) : (
+                    // Smart settlements
+                    smartSettlements.slice(0, 4).map((settlement, index) => (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: index * 0.1 }}
+                      >
+                        <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-purple-500"></div>
+                          <div className="absolute top-1 right-1">
+                            <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-blue-900 dark:text-blue-300 flex items-center">
+                              <FaMagic className="mr-1" size={10} />
+                              Smart
+                            </span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                            <div className="text-center sm:text-left">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                {getFriendName(settlement.from).charAt(0)}
+                              </div>
+                              <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                              <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                <span className="mr-1">pays</span>
+                                <FaArrowRight size={10} className="text-gray-400" />
+                              </p>
+                            </div>
+                            
+                            <div className="text-xl font-bold text-blue-600 bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300 px-4 py-2 rounded-full flex items-center shadow-inner">
+                              <IndianRupee className="h-5 w-5 mr-1" />
+                              {settlement.amount.toFixed(2)}
+                            </div>
+                            
+                            <div className="text-center sm:text-right">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                {getFriendName(settlement.to).charAt(0)}
+                              </div>
+                              <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                              <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                <span>receives</span>
+                              </p>
+                            </div>
+                          </div>
+                        </Card>
+                      </motion.div>
+                    ))
+                  )
                 ) : (
                   // Show settlements for the selected friend
-                  getSettlementsForFriend(activeSettlementTab).length > 0 ? (
-                    getSettlementsForFriend(activeSettlementTab).map((settlement, index) => {
-                      const isReceiving = settlement.to === activeSettlementTab;
-                      
-                      return (
-                        <motion.div
-                          key={index}
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: index * 0.1 }}
-                        >
-                          <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-green-50/50 dark:bg-green-900/20' : 'bg-red-50/50 dark:bg-red-900/20'}`}>
-                            <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-green-500 to-green-700' : 'bg-gradient-to-b from-red-500 to-red-700'}`}></div>
-                            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                              {isReceiving ? (
-                                // This friend is receiving money
-                                <>
-                                  <div className="text-center sm:text-left">
-                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                                      {getFriendName(settlement.from).charAt(0)}
+                  settlementType === 'regular' ? (
+                    // Regular settlements for selected friend
+                    getSettlementsForFriend(activeSettlementTab).length > 0 ? (
+                      getSettlementsForFriend(activeSettlementTab).map((settlement, index) => {
+                        const isReceiving = settlement.to === activeSettlementTab;
+                        
+                        return (
+                          <motion.div
+                            key={index}
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: index * 0.1 }}
+                          >
+                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-green-50/50 dark:bg-green-900/20' : 'bg-red-50/50 dark:bg-red-900/20'}`}>
+                              <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-green-500 to-green-700' : 'bg-gradient-to-b from-red-500 to-red-700'}`}></div>
+                              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                                {isReceiving ? (
+                                  // This friend is receiving money
+                                  <>
+                                    <div className="text-center sm:text-left">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        {getFriendName(settlement.from).charAt(0)}
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                        <span className="mr-1">pays</span>
+                                        <FaArrowRight size={10} className="text-gray-400" />
+                                      </p>
                                     </div>
-                                    <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
-                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
-                                      <span className="mr-1">pays you</span>
-                                      <FaArrowRight size={10} className="text-gray-400" />
-                                    </p>
-                                  </div>
-                                  
-                                  <div className="text-xl font-bold text-green-600 bg-green-100 dark:bg-green-900/40 px-4 py-2 rounded-full flex items-center shadow-inner">
-                                    <IndianRupee className="h-5 w-5 mr-1" />
-                                    {settlement.amount.toFixed(2)}
-                                  </div>
-                                  
-                                  <div className="text-center sm:text-right">
-                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                                      <span className="text-xl">You</span>
+                                    
+                                    <div className="text-xl font-bold text-green-600 bg-green-100 dark:bg-green-900/40 dark:text-green-300 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                      <IndianRupee className="h-5 w-5 mr-1" />
+                                      {settlement.amount.toFixed(2)}
                                     </div>
-                                    <p className="text-lg font-semibold mt-2">You</p>
-                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
-                                      <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
-                                      <span>receive</span>
-                                    </p>
-                                  </div>
-                                </>
-                              ) : (
-                                // This friend is paying money
-                                <>
-                                  <div className="text-center sm:text-left">
-                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                                      <span className="text-xl">You</span>
+                                    
+                                    <div className="text-center sm:text-right">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        <span className="text-xl">You</span>
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">You</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                        <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                        <span>receive</span>
+                                      </p>
                                     </div>
-                                    <p className="text-lg font-semibold mt-2">You</p>
-                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
-                                      <span className="mr-1">pay</span>
-                                      <FaArrowRight size={10} className="text-gray-400" />
-                                    </p>
-                                  </div>
-                                  
-                                  <div className="text-xl font-bold text-red-600 bg-red-100 dark:bg-red-900/40 px-4 py-2 rounded-full flex items-center shadow-inner">
-                                    <IndianRupee className="h-5 w-5 mr-1" />
-                                    {settlement.amount.toFixed(2)}
-                                  </div>
-                                  
-                                  <div className="text-center sm:text-right">
-                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
-                                      {getFriendName(settlement.to).charAt(0)}
+                                  </>
+                                ) : (
+                                  // This friend is paying money
+                                  <>
+                                    <div className="text-center sm:text-left">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        <span className="text-xl">You</span>
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">You</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                        <span className="mr-1">pay</span>
+                                        <FaArrowRight size={10} className="text-gray-400" />
+                                      </p>
                                     </div>
-                                    <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
-                                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
-                                      <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
-                                      <span>receives</span>
-                                    </p>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </Card>
-                        </motion.div>
-                      );
-                    })
+                                    
+                                    <div className="text-xl font-bold text-red-600 bg-red-100 dark:bg-red-900/40 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                      <IndianRupee className="h-5 w-5 mr-1" />
+                                      {settlement.amount.toFixed(2)}
+                                    </div>
+                                    
+                                    <div className="text-center sm:text-right">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        {getFriendName(settlement.to).charAt(0)}
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                        <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                        <span>receives</span>
+                                      </p>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </Card>
+                          </motion.div>
+                        );
+                      })
+                    ) : (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="col-span-1 md:col-span-2"
+                      >
+                        <Card className="text-center p-8 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-0 shadow-md">
+                          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                          <p className="text-gray-600 dark:text-gray-300 text-lg">
+                            <span className="font-semibold">{getFriendName(activeSettlementTab)}</span> is all settled up!
+                          </p>
+                          <p className="text-gray-500 dark:text-gray-400 mt-2">No payments needed at this time.</p>
+                        </Card>
+                      </motion.div>
+                    )
                   ) : (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="col-span-1 md:col-span-2"
-                    >
-                      <Card className="text-center p-8 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-0 shadow-md">
-                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        </div>
-                        <p className="text-gray-600 dark:text-gray-300 text-lg">
-                          <span className="font-semibold">{getFriendName(activeSettlementTab)}</span> is all settled up!
-                        </p>
-                        <p className="text-gray-500 dark:text-gray-400 mt-2">No payments needed at this time.</p>
-                      </Card>
-                    </motion.div>
+                    // Smart settlements for selected friend
+                    getSmartSettlementsForFriend(activeSettlementTab).length > 0 ? (
+                      getSmartSettlementsForFriend(activeSettlementTab).map((settlement, index) => {
+                        const isReceiving = settlement.to === activeSettlementTab;
+                        
+                        return (
+                          <motion.div
+                            key={index}
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: index * 0.1 }}
+                          >
+                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-blue-50/50 dark:bg-blue-900/20' : 'bg-indigo-50/50 dark:bg-indigo-900/20'}`}>
+                              <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-blue-500 to-blue-700' : 'bg-gradient-to-b from-indigo-500 to-indigo-700'}`}></div>
+                              <div className="absolute top-1 right-1">
+                                <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-blue-900 dark:text-blue-300 flex items-center">
+                                  <FaMagic className="mr-1" size={10} />
+                                  Smart
+                                </span>
+                              </div>
+                              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                                {isReceiving ? (
+                                  // This friend is receiving money
+                                  <>
+                                    <div className="text-center sm:text-left">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        {getFriendName(settlement.from).charAt(0)}
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">{getFriendName(settlement.from)}</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                        <span className="mr-1">pays</span>
+                                        <FaArrowRight size={10} className="text-gray-400" />
+                                      </p>
+                                    </div>
+                                    
+                                    <div className="text-xl font-bold text-blue-600 bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                      <IndianRupee className="h-5 w-5 mr-1" />
+                                      {settlement.amount.toFixed(2)}
+                                    </div>
+                                    
+                                    <div className="text-center sm:text-right">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        <span className="text-xl">You</span>
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">You</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                        <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                        <span>receive</span>
+                                      </p>
+                                    </div>
+                                  </>
+                                ) : (
+                                  // This friend is paying money
+                                  <>
+                                    <div className="text-center sm:text-left">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        <span className="text-xl">You</span>
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">You</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start">
+                                        <span className="mr-1">pay</span>
+                                        <FaArrowRight size={10} className="text-gray-400" />
+                                      </p>
+                                    </div>
+                                    
+                                    <div className="text-xl font-bold text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300 px-4 py-2 rounded-full flex items-center shadow-inner">
+                                      <IndianRupee className="h-5 w-5 mr-1" />
+                                      {settlement.amount.toFixed(2)}
+                                    </div>
+                                    
+                                    <div className="text-center sm:text-right">
+                                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
+                                        {getFriendName(settlement.to).charAt(0)}
+                                      </div>
+                                      <p className="text-lg font-semibold mt-2">{getFriendName(settlement.to)}</p>
+                                      <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-end">
+                                        <FaArrowRight size={10} className="text-gray-400 rotate-180 mr-1" />
+                                        <span>receives</span>
+                                      </p>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </Card>
+                          </motion.div>
+                        );
+                      })
+                    ) : (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="col-span-1 md:col-span-2"
+                      >
+                        <Card className="text-center p-8 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-0 shadow-md">
+                          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                            <FaMagic className="h-8 w-8" />
+                          </div>
+                          <p className="text-gray-600 dark:text-gray-300 text-lg">
+                            <span className="font-semibold">{getFriendName(activeSettlementTab)}</span> is all settled up!
+                          </p>
+                          <p className="text-gray-500 dark:text-gray-400 mt-2">No smart payments needed at this time.</p>
+                        </Card>
+                      </motion.div>
+                    )
                   )
                 )}
               </motion.div>

@@ -684,6 +684,107 @@ export function ExpenseProvider({ children }) {
     }
   }, [expenses, expenseParticipants, friends]);
 
+  // Calculate smart debt settlements using debt simplification algorithm
+  const calculateSmartSettlements = useCallback(() => {
+    try {
+      // Step 1: Calculate the net balance for each person
+      const balances = {};
+      
+      // Initialize balances for all friends
+      friends.forEach(friend => {
+        balances[friend.id] = 0;
+      });
+
+      // Calculate net balance for each friend
+      expenses.forEach(expense => {
+        const payer = expense.paid_by;
+        if (!payer) return;
+        
+        // Get participants for this expense
+        const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
+        if (!participants || participants.length === 0) return;
+        
+        // The payer paid the full amount
+        const fullAmount = parseFloat(expense.amount);
+        
+        // Find the payer's own share
+        const payerParticipant = participants.find(p => p.user_id === payer);
+        const payerOwnShare = payerParticipant ? parseFloat(payerParticipant.share) : 0;
+        
+        // The payer is owed the amount they paid for others
+        const paidForOthers = fullAmount - payerOwnShare;
+        balances[payer] = (balances[payer] || 0) + paidForOthers;
+        
+        // Distribute expense among participants (excluding the payer)
+        participants.forEach(participant => {
+          if (participant.user_id && participant.user_id !== payer) {
+            const share = parseFloat(participant.share);
+            balances[participant.user_id] = (balances[participant.user_id] || 0) - share;
+          }
+        });
+      });
+      
+      console.log("Net balances:", JSON.stringify(balances, null, 2));
+      
+      // Step 2: Separate into creditors (positive balance) and debtors (negative balance)
+      const creditors = [];
+      const debtors = [];
+      
+      Object.entries(balances).forEach(([personId, balance]) => {
+        if (balance > 0.01) {
+          creditors.push({ id: personId, amount: balance });
+        } else if (balance < -0.01) {
+          debtors.push({ id: personId, amount: -balance }); // Convert to positive amount
+        }
+      });
+      
+      // Sort by amount (descending)
+      creditors.sort((a, b) => b.amount - a.amount);
+      debtors.sort((a, b) => b.amount - a.amount);
+      
+      console.log("Creditors:", creditors);
+      console.log("Debtors:", debtors);
+      
+      // Step 3: Create optimized settlements
+      const smartSettlements = [];
+      
+      while (debtors.length > 0 && creditors.length > 0) {
+        const debtor = debtors[0];
+        const creditor = creditors[0];
+        
+        // Calculate the amount to settle
+        const amount = Math.min(debtor.amount, creditor.amount);
+        
+        if (amount > 0.01) {
+          smartSettlements.push({
+            from: debtor.id,
+            to: creditor.id,
+            amount: amount
+          });
+        }
+        
+        // Update remaining amounts
+        debtor.amount -= amount;
+        creditor.amount -= amount;
+        
+        // Remove entries with zero balance
+        if (debtor.amount < 0.01) {
+          debtors.shift();
+        }
+        
+        if (creditor.amount < 0.01) {
+          creditors.shift();
+        }
+      }
+      
+      console.log("Smart settlements:", smartSettlements);
+      return smartSettlements;
+    } catch (error) {
+      console.error("Error calculating smart settlements:", error);
+      return [];
+    }
+  }, [expenses, expenseParticipants, friends]);
+
   // Get a trip by ID
   const getTripById = useCallback(async (tripId) => {
     if (!tripId) {
@@ -1269,6 +1370,7 @@ export function ExpenseProvider({ children }) {
     getFriendById,
     calculateBalances,
     calculateSettlements,
+    calculateSmartSettlements,
     addUser,
     addFriend,
     editFriend,
