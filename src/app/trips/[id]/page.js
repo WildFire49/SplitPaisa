@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck } from "react-icons/fa";
+import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck, FaExchangeAlt, FaMoneyBillWave, FaArrowRight } from "react-icons/fa";
 import { useExpenseStore } from "@/store/expenseStore";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -366,9 +366,10 @@ function TripDetailsContent() {
                         {formatCurrency(expense.amount)}
                       </span>
                       <button 
-                        className="text-sm text-error mt-2 hover:underline"
+                        className="text-sm text-error mt-2 hover:underline flex items-center"
                         onClick={() => handleDeleteExpense(expense.id)}
                       >
+                        <FaTrash className="mr-1" size={12} />
                         Delete
                       </button>
                     </div>
@@ -391,7 +392,9 @@ function TripDetailsContent() {
       
       {/* Settlements */}
       <section>
-        <h2 className="text-2xl font-semibold mb-4">Settlements</h2>
+        <h2 className="text-2xl font-semibold mb-4 flex items-center">
+          <FaExchangeAlt className="mr-2" /> Settlements
+        </h2>
         
         {tripSettlements.length > 0 ? (
           <div className="space-y-4">
@@ -402,21 +405,38 @@ function TripDetailsContent() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card className="p-4">
-                  <div className="flex items-center justify-between">
+                <Card className="p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center">
-                      <span className="font-semibold">{getFriendById(settlement.from)?.name || "Unknown"}</span>
-                      <ArrowRight className="mx-3 text-primary" />
-                      <span className="font-semibold">{getFriendById(settlement.to)?.name || "Unknown"}</span>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <div className="flex items-center justify-center px-3 py-2 rounded-lg bg-tertiary-100 dark:bg-tertiary-900 text-tertiary-600 dark:text-tertiary-400 font-medium">
+                          {getFriendById(settlement.from)?.name || "Unknown"}
+                        </div>
+                        <div className="flex items-center my-2 sm:my-0">
+                          <FaArrowRight className="mx-2 text-gray-400" />
+                        </div>
+                        <div className="flex items-center justify-center px-3 py-2 rounded-lg bg-secondary-100 dark:bg-secondary-900 text-secondary-600 dark:text-secondary-400 font-medium">
+                          {getFriendById(settlement.to)?.name || "Unknown"}
+                        </div>
+                      </div>
                     </div>
-                    <span className="font-bold">{formatCurrency(settlement.amount)}</span>
+                    <div className="flex items-center bg-primary-50 dark:bg-primary-900/30 px-4 py-2 rounded-lg">
+                      <FaMoneyBillWave className="mr-2 text-primary-500" />
+                      <span className="font-bold text-primary-700 dark:text-primary-300">
+                        {formatCurrency(settlement.amount)}
+                      </span>
+                    </div>
                   </div>
+                  <p className="text-sm text-gray-500 mt-3">
+                    <span className="font-medium">{getFriendById(settlement.from)?.name || "Unknown"}</span> needs to pay <span className="font-medium">{getFriendById(settlement.to)?.name || "Unknown"}</span>
+                  </p>
                 </Card>
               </motion.div>
             ))}
           </div>
         ) : (
           <Card className="p-6 text-center">
+            <FaExchangeAlt className="mx-auto text-gray-400 mb-2" size={24} />
             <p className="text-gray-500">Everyone is settled up! No payments needed.</p>
           </Card>
         )}
