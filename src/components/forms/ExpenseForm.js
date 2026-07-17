@@ -30,10 +30,29 @@ const ExpenseForm = ({ tripId }) => {
   useEffect(() => {
     const fetchTripData = async () => {
       if (tripId) {
-        const foundTrip = await getTripById(tripId);
-        setTrip(foundTrip);
+        // Add retry logic for fetching trip data
+        let foundTrip = null;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (!foundTrip && retryCount < maxRetries) {
+          foundTrip = await getTripById(tripId);
+          
+          if (!foundTrip) {
+            console.log(`Trip not found in ExpenseForm on attempt ${retryCount + 1}, retrying...`);
+            retryCount++;
+            
+            if (retryCount < maxRetries) {
+              // Wait before retrying to allow database sync
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
         
         if (foundTrip) {
+          console.log("Found trip for expense form:", foundTrip);
+          setTrip(foundTrip);
+          
           // Set trip ID in form
           setFormData(prev => ({
             ...prev,
@@ -53,17 +72,21 @@ const ExpenseForm = ({ tripId }) => {
               ...prev,
               participants: memberDetails.map(member => member.id)
             }));
+          } else {
+            console.log("Trip has no members, using all friends as potential participants");
+            setTripMembers(friends);
           }
+        } else {
+          console.error("Trip not found after retries:", tripId);
+          // If trip not found, still allow expense creation but without trip context
+          setTripMembers(friends);
         }
       } else {
-        setFormData(prev => ({
-          ...prev,
-          tripId: ''
-        }));
+        // No trip ID, use all friends
         setTripMembers(friends);
       }
     };
-    
+
     fetchTripData();
   }, [tripId, getTripById, friends]);
 
@@ -160,24 +183,38 @@ const ExpenseForm = ({ tripId }) => {
       return;
     }
     
-    // Convert amount to number and add current date
-    const expenseData = {
-      ...formData,
-      amount: parseFloat(formData.amount),
-      date: new Date().toISOString() // Add current date automatically
-    };
-    
-    console.log("Submitting expense data:", expenseData);
-    
-    await addExpense(expenseData);
-    
-    // Refresh data once after adding an expense
-    refreshDataOnce();
-    
-    if (tripId) {
-      router.push(`/trips/${tripId}`);
-    } else {
-      router.push('/');
+    try {
+      // Convert amount to number
+      const expenseData = {
+        ...formData,
+        amount: parseFloat(formData.amount)
+        // No date field as it doesn't exist in the database schema
+      };
+      
+      console.log("Submitting expense data:", expenseData);
+      
+      // If tripId is provided but not in formData, ensure it's included
+      if (tripId && !formData.tripId) {
+        expenseData.tripId = tripId;
+      }
+      
+      const expenseId = await addExpense(expenseData);
+      console.log("Expense added successfully with ID:", expenseId);
+      
+      // Refresh data once after adding an expense
+      refreshDataOnce();
+      
+      // Navigate back to appropriate page
+      if (tripId) {
+        router.push(`/trips/${tripId}`);
+      } else {
+        router.push('/');
+      }
+    } catch (error) {
+      console.error("Error adding expense:", error);
+      setErrors({
+        submit: "Failed to add expense. Please try again."
+      });
     }
   };
 

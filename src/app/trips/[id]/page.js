@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck, FaExchangeAlt, FaMoneyBillWave, FaArrowRight, FaUserFriends, FaTimes } from "react-icons/fa";
+import { FaPlus, FaTrash, FaShare, FaClipboard, FaCheck, FaExchangeAlt, FaMoneyBillWave, FaArrowRight, FaUserFriends, FaTimes, FaHistory } from "react-icons/fa";
 import { useExpenseStore } from "@/store/expenseStore";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -31,7 +31,9 @@ function TripDetailsContent() {
     trips,
     expenses: allExpenses,
     getTripMembers,
-    removeTripMember
+    removeTripMember,
+    markTripAsSettled,
+    toggleTripSettlementStatus
   } = useExpenseStore();
   
   const [trip, setTrip] = useState(null);
@@ -44,7 +46,9 @@ function TripDetailsContent() {
   const [loadError, setLoadError] = useState(null);
   const [tripMembers, setTripMembers] = useState([]);
   const [removingMember, setRemovingMember] = useState(null);
-
+  const [isSettling, setIsSettling] = useState(false);
+  const [settledUserIds, setSettledUserIds] = useState([]);
+  
   // Track if data has been fetched to prevent duplicate API calls
   const dataFetched = useRef(false);
   const pendingRequest = useRef(false);
@@ -195,10 +199,28 @@ function TripDetailsContent() {
       
       try {
         console.log("Fetching trip with ID:", tripId);
-        const tripData = await getTripById(tripId);
+        
+        // Add retry logic to handle race conditions
+        let tripData = null;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (!tripData && retryCount < maxRetries) {
+          tripData = await getTripById(tripId);
+          
+          if (!tripData) {
+            console.log(`Trip not found on attempt ${retryCount + 1}, retrying...`);
+            retryCount++;
+            
+            if (retryCount < maxRetries) {
+              // Wait before retrying to allow database sync
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
         
         if (!tripData) {
-          console.error("Trip not found for ID:", tripId);
+          console.error("Trip not found for ID after retries:", tripId);
           setLoadError(`Trip not found. The trip with ID ${tripId} may have been deleted or does not exist.`);
           setIsLoading(false);
           pendingRequest.current = false;
@@ -308,6 +330,35 @@ function TripDetailsContent() {
     }
   };
 
+  // Handle toggling trip settlement status
+  const handleToggleSettlement = async () => {
+    if (isSettling) return;
+    
+    setIsSettling(true);
+    
+    try {
+      await toggleTripSettlementStatus(tripId);
+      
+      // Refresh trip data
+      const tripData = await getTripById(tripId);
+      setTrip(tripData);
+    } catch (err) {
+      console.error("Error toggling settlement status:", err);
+      setLoadError(`Failed to toggle settlement status: ${err.message}`);
+    } finally {
+      setIsSettling(false);
+    }
+  };
+  
+  // Handle marking a specific user as settled
+  const handleMarkUserSettled = (userId) => {
+    if (settledUserIds.includes(userId)) {
+      setSettledUserIds(prev => prev.filter(id => id !== userId));
+    } else {
+      setSettledUserIds(prev => [...prev, userId]);
+    }
+  };
+
   if (loading || isLoading) {
     return (
       <div className="flex justify-center items-center min-h-[60vh]">
@@ -351,18 +402,28 @@ function TripDetailsContent() {
       {/* Trip Info */}
       <section className="mb-8">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-3xl font-bold">{trip?.name || "Trip Details"}</h1>
+          <div>
+            <h1 className="text-3xl font-bold">{trip?.name || "Trip Details"}</h1>
+            {trip?.is_settled && (
+              <span className="inline-flex items-center bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full ml-2">
+                <FaCheck className="mr-1" />
+                Settled
+              </span>
+            )}
+          </div>
           <div className="flex space-x-2">
-            <Link href={`/expenses/new?tripId=${tripId}`}>
-              <Button
-                variant="primary"
-                size="sm"
-                className="flex items-center"
-              >
-                <FaPlus className="mr-2" />
-                Add Expense
-              </Button>
-            </Link>
+            {!trip?.is_settled && (
+              <Link href={`/expenses/new?tripId=${tripId}`}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="flex items-center"
+                >
+                  <FaPlus className="mr-2" />
+                  Add Expense
+                </Button>
+              </Link>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -373,9 +434,30 @@ function TripDetailsContent() {
               {copied ? "Copied!" : "Share"}
             </Button>
             <Button
+              variant={trip?.is_settled ? "success" : "warning"}
+              size="sm"
+              onClick={handleToggleSettlement}
+              disabled={isSettling}
+              className="flex items-center"
+            >
+              {isSettling ? (
+                <span>Processing...</span>
+              ) : trip?.is_settled ? (
+                <>
+                  <FaMoneyBillWave className="mr-2" />
+                  Reopen Trip
+                </>
+              ) : (
+                <>
+                  <FaCheck className="mr-2" />
+                  Mark as Settled
+                </>
+              )}
+            </Button>
+            <Button
               variant="danger"
               size="sm"
-              onClick={() => setConfirmDelete(true)}
+              onClick={handleDeleteTrip}
               className="flex items-center"
             >
               <FaTrash className="mr-2" />
@@ -554,10 +636,12 @@ function TripDetailsContent() {
                   return null;
                 }
                 
+                const isSettled = settledUserIds.includes(settlement.from);
+                
                 return (
-                  <div key={index} className="flex items-center p-4 bg-[#1e293b] border-2 border-[#334155] rounded-xl shadow-md hover:shadow-lg transition-all">
+                  <div key={index} className={`flex items-center p-4 bg-[#1e293b] border-2 border-[#334155] rounded-xl shadow-md hover:shadow-lg transition-all ${isSettled ? 'opacity-70' : ''}`}>
                     <div className="flex-1 flex items-center">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#059669] via-[#10B981] to-[#34D399] flex items-center justify-center text-[#f8fafc] mr-3 shadow-md">
+                      <div className={`w-12 h-12 rounded-full ${isSettled ? 'bg-gradient-to-br from-[#4ade80] via-[#22c55e] to-[#16a34a]' : 'bg-gradient-to-br from-[#059669] via-[#10B981] to-[#34D399]'} flex items-center justify-center text-[#f8fafc] mr-3 shadow-md`}>
                         {fromFriend.name.charAt(0)}
                       </div>
                       <div className="flex-1">
@@ -586,9 +670,30 @@ function TripDetailsContent() {
                           <span className="ml-1">receives</span>
                         </p>
                       </div>
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#34D399] via-[#10B981] to-[#059669] flex items-center justify-center text-[#f8fafc] ml-3 shadow-md">
+                      <div className={`w-12 h-12 rounded-full ${isSettled ? 'bg-gradient-to-br from-[#4ade80] via-[#22c55e] to-[#16a34a]' : 'bg-gradient-to-br from-[#34D399] via-[#10B981] to-[#059669]'} flex items-center justify-center text-[#f8fafc] ml-3 shadow-md`}>
                         {toFriend.name.charAt(0)}
                       </div>
+                    </div>
+                    
+                    <div className="ml-4">
+                      <Button
+                        variant={isSettled ? "success" : "outline"}
+                        size="sm"
+                        onClick={() => handleMarkUserSettled(settlement.from)}
+                        className={`flex items-center ${isSettled ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'text-gray-300 hover:text-white'}`}
+                      >
+                        {isSettled ? (
+                          <>
+                            <FaCheck className="mr-1" />
+                            Settled
+                          </>
+                        ) : (
+                          <>
+                            <FaMoneyBillWave className="mr-1" />
+                            Mark Settled
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
                 );
