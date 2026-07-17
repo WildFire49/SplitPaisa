@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS trips (
   name TEXT NOT NULL,
   description TEXT,
   date DATE,
+  is_settled BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

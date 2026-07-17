@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef, Suspense } from 'react';
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight, FaExchangeAlt, FaMagic } from 'react-icons/fa';
+import { FaPlus, FaWallet, FaUsers, FaCalendarAlt, FaTag, FaArrowRight, FaExchangeAlt, FaMagic, FaCheck, FaMoneyBillWave, FaInfoCircle } from 'react-icons/fa';
 import { useExpenseStore } from '@/store/expenseStore';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -11,50 +11,73 @@ import { IndianRupee } from 'lucide-react';
 
 // Client component
 function HomeContent() {
-  const { trips, expenses, friends, calculateSettlements, calculateSmartSettlements, fetchData } = useExpenseStore();
+  const { 
+    trips, 
+    expenses, 
+    friends, 
+    fetchData, 
+    calculateBalances, 
+    calculateSettlements,
+    calculateSmartSettlements,
+    markSettlementAsSettled,
+    isSettlementSettled,
+    refreshDataOnce,
+    expenseParticipants,
+    currentUser
+  } = useExpenseStore();
+  
   const [settlements, setSettlements] = useState([]);
   const [smartSettlements, setSmartSettlements] = useState([]);
   const [recentTrips, setRecentTrips] = useState([]);
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [settlementType, setSettlementType] = useState('smart');
+  const [settledPayments, setSettledPayments] = useState({
+    regular: {},
+    smart: {}
+  });
 
   // Track if data has been fetched to prevent duplicate API calls
   const dataFetched = useRef(false);
   const pendingRequest = useRef(false);
 
-  useEffect(() => {
-    // Refresh data when component mounts
-    const refreshData = async () => {
-      // Prevent duplicate API calls
-      if (pendingRequest.current) {
-        console.log('Home data fetch already in progress, skipping duplicate call');
-        return;
-      }
-      
-      // Skip if data is already fetched
-      if (dataFetched.current) {
-        console.log('Home data already fetched, skipping fetch');
-        setIsLoading(false);
-        return;
-      }
-      
-      pendingRequest.current = true;
-      setIsLoading(true);
-      
-      try {
-        await fetchData();
-        // Mark data as fetched
-        dataFetched.current = true;
-      } catch (error) {
-        console.error('Error refreshing data:', error);
-      } finally {
-        setIsLoading(false);
-        pendingRequest.current = false;
-      }
-    };
+  const refreshData = useCallback(async () => {
+    // Prevent duplicate API calls
+    if (pendingRequest.current) {
+      console.log('Home data fetch already in progress, skipping duplicate call');
+      return;
+    }
     
+    pendingRequest.current = true;
+    setIsLoading(true);
+    
+    try {
+      await refreshDataOnce(); // Use the refreshDataOnce function from expenseStore
+      dataFetched.current = true;
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setIsLoading(false);
+      pendingRequest.current = false;
+    }
+  }, [refreshDataOnce]);
+
+  useEffect(() => {
     refreshData();
-  }, [fetchData]);
+  }, [refreshData]);
+
+  useEffect(() => {
+    // Listen for changes in the expense store data
+    if (expenses.length > 0 && dataFetched.current) {
+      console.log('Expenses changed, refreshing data');
+      // We'll use a timeout to avoid immediate refresh during rendering
+      const timer = setTimeout(() => {
+        refreshData();
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [expenses, refreshData]);
 
   useEffect(() => {
     if (!trips || !expenses) return;
@@ -67,6 +90,27 @@ function HomeContent() {
       // Calculate smart settlements
       const calculatedSmartSettlements = calculateSmartSettlements();
       setSmartSettlements(calculatedSmartSettlements || []);
+
+      // Load settlement status from localStorage
+      const regularSettled = {};
+      const smartSettled = {};
+      
+      if (calculatedSettlements) {
+        calculatedSettlements.forEach((settlement, index) => {
+          regularSettled[index] = isSettlementSettled(`${settlement.from}_${settlement.to}`, 'regular');
+        });
+      }
+      
+      if (calculatedSmartSettlements) {
+        calculatedSmartSettlements.forEach((settlement, index) => {
+          smartSettled[index] = isSettlementSettled(`${settlement.from}_${settlement.to}`, 'smart');
+        });
+      }
+      
+      setSettledPayments({
+        regular: regularSettled,
+        smart: smartSettled
+      });
 
       // Get recent trips (last 3)
       if (trips && trips.length > 0) {
@@ -86,7 +130,7 @@ function HomeContent() {
     } catch (error) {
       console.error('Error processing data in HomeContent:', error);
     }
-  }, [trips, expenses, calculateSettlements, calculateSmartSettlements]);
+  }, [trips, expenses, calculateSettlements, calculateSmartSettlements, isSettlementSettled]);
 
   // Format currency
   const formatCurrency = (amount) => {
@@ -127,8 +171,96 @@ function HomeContent() {
   // State for the active tab in settlements
   const [activeSettlementTab, setActiveSettlementTab] = useState('all');
   
-  // State for settlement type (regular or smart)
-  const [settlementType, setSettlementType] = useState('regular');
+  // Calculate total settlements amount (excluding settled ones)
+  const calculateTotalSettlements = (type = 'regular') => {
+    const settlementList = type === 'regular' ? settlements : smartSettlements;
+    if (!settlementList || settlementList.length === 0) return 0;
+    
+    let total = 0;
+    settlementList.forEach((settlement, index) => {
+      // Only include unsettled settlements in the total
+      if (!settledPayments[type][index]) {
+        total += settlement.amount;
+      }
+    });
+    
+    return total;
+  };
+
+  // Handle marking a settlement as settled
+  const handleMarkSettled = async (settlementIndex, type = 'regular') => {
+    try {
+      const settlementList = type === 'regular' ? settlements : smartSettlements;
+      if (!settlementList || settlementList.length <= settlementIndex) return;
+      
+      const settlement = settlementList[settlementIndex];
+      const isCurrentlySettled = settledPayments[type][settlementIndex];
+      const settlementId = `${settlement.from}_${settlement.to}`;
+      
+      // Toggle the settlement status
+      await markSettlementAsSettled(settlementId, !isCurrentlySettled, type);
+      
+      // Update local state
+      setSettledPayments(prev => {
+        const newSettled = { ...prev };
+        newSettled[type] = { ...newSettled[type] };
+        newSettled[type][settlementIndex] = !isCurrentlySettled;
+        return newSettled;
+      });
+    } catch (error) {
+      console.error('Error marking settlement as settled:', error);
+    }
+  };
+
+  // Check if all settlements are marked as settled
+  const areAllSettlementsSettled = (type = 'regular') => {
+    const settlementList = type === 'regular' ? settlements : smartSettlements;
+    if (settlementList.length === 0) return false;
+    
+    for (let i = 0; i < settlementList.length; i++) {
+      if (!settledPayments[type][i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Get trip total
+  const getTripTotal = (tripId) => {
+    if (!expenses) return 0;
+    return expenses
+      .filter(expense => expense.trip_id === tripId)
+      .reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+  };
+
+  // Get user's share in a trip
+  const getTripUserShare = (tripId) => {
+    if (!expenses || !friends) return 0;
+    
+    let userShare = 0;
+    const tripExpenses = expenses.filter(expense => expense.trip_id === tripId);
+    
+    tripExpenses.forEach(expense => {
+      // Find the expense participants
+      const participants = expenseParticipants.filter(p => p.expense_id === expense.id);
+      if (!participants) return;
+      
+      // Find the current user's participant record
+      const currentUserParticipant = participants.find(p => p.user_id === currentUser?.id);
+      if (currentUserParticipant) {
+        userShare += parseFloat(currentUserParticipant.share);
+      }
+    });
+    
+    return userShare;
+  };
+
+  // Get initials from a name
+  const getInitials = (name) => {
+    if (!name) return '';
+    const parts = name.split(' ');
+    return parts[0].charAt(0) + (parts.length > 1 ? parts[1].charAt(0) : '');
+  };
 
   return (
     <div className="space-y-8">
@@ -173,15 +305,42 @@ function HomeContent() {
             <div className="space-y-4">
               {recentTrips.map(trip => (
                 <Link key={trip.id} href={`/trips/${trip.id}`}>
-                  <Card className="p-4 cursor-pointer hover:shadow-md transition-shadow duration-300">
-                    <h3 className="font-semibold text-lg">{trip.name}</h3>
-                    <p className="text-gray-500 text-sm">
-                      {new Date(trip.date).toLocaleDateString('en-IN', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
+                  <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center">
+                        <FaTag className="text-primary mr-2" />
+                        <h3 className="text-lg font-semibold">{trip.name}</h3>
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {new Date(trip.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mr-3">
+                          {getInitials(trip.created_by_name || 'User')}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{trip.created_by_name || 'Vaishakh'}</p>
+                          <p className="text-xs text-gray-500">Created by</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <div className="flex items-center">
+                          <span className="font-bold text-lg">{formatCurrency(getTripTotal(trip.id))}</span>
+                          <div className="ml-1 group relative">
+                            <FaInfoCircle className="text-gray-400 cursor-pointer hover:text-primary transition-colors" size={14} />
+                            <div className="absolute bottom-full right-0 mb-2 w-48 p-2 bg-white dark:bg-gray-800 rounded-md shadow-lg text-xs text-gray-600 dark:text-gray-300 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-10">
+                              <p className="font-semibold mb-1">Trip Expense Breakdown:</p>
+                              <p>Total: {formatCurrency(getTripTotal(trip.id))}</p>
+                              <p>Your Share: {formatCurrency(getTripUserShare(trip.id))}</p>
+                              <div className="absolute bottom-0 right-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-white dark:bg-gray-800"></div>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500">Total expenses</p>
+                      </div>
+                    </div>
                   </Card>
                 </Link>
               ))}
@@ -276,6 +435,17 @@ function HomeContent() {
             {/* Settlement type selector */}
             <div className="mb-6 flex justify-center">
               <div className="inline-flex rounded-md shadow-sm p-1 bg-gray-100 dark:bg-gray-800">
+              <button
+                  onClick={() => setSettlementType('smart')}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ${
+                    settlementType === 'smart'
+                      ? 'bg-white dark:bg-gray-700 shadow-sm text-primary'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <FaMagic className="inline mr-2" size={14} />
+                  Smart Settlements
+                </button>
                 <button
                   onClick={() => setSettlementType('regular')}
                   className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ${
@@ -287,19 +457,19 @@ function HomeContent() {
                   <FaExchangeAlt className="inline mr-2" size={14} />
                   Regular Settlements
                 </button>
-                <button
-                  onClick={() => setSettlementType('smart')}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ${
-                    settlementType === 'smart'
-                      ? 'bg-white dark:bg-gray-700 shadow-sm text-primary'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <FaMagic className="inline mr-2" size={14} />
-                  Smart Settlements
-                </button>
+                
               </div>
             </div>
+
+            {/* All Settled Message */}
+            {areAllSettlementsSettled(settlementType) && (
+              <div className="mb-6 text-center">
+                <div className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 p-4 rounded-lg inline-flex items-center">
+                  <FaCheck className="mr-2" />
+                  <span className="font-medium">All payments have been settled! No settlements needed.</span>
+                </div>
+              </div>
+            )}
             
             {/* Tabs for settlements */}
             <div className="mb-6 border-b border-gray-200/50 dark:border-gray-700/50 pb-1 overflow-x-auto hide-scrollbar">
@@ -360,8 +530,16 @@ function HomeContent() {
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: index * 0.1 }}
                       >
-                        <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
+                        <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${settledPayments.regular[index] ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
                           <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-purple-500"></div>
+                          {settledPayments.regular[index] && (
+                            <div className="absolute top-1 right-1">
+                              <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-green-900 dark:text-green-300 flex items-center">
+                                <FaCheck className="mr-1" size={10} />
+                                Settled
+                              </span>
+                            </div>
+                          )}
                           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                             <div className="text-center sm:text-left">
                               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
@@ -390,6 +568,28 @@ function HomeContent() {
                               </p>
                             </div>
                           </div>
+                          
+                          {/* Mark as Settled Button */}
+                          <div className="mt-4 text-center">
+                            <Button
+                              variant={settledPayments.regular[index] ? "success" : "outline"}
+                              size="sm"
+                              onClick={() => handleMarkSettled(index, 'regular')}
+                              className="flex items-center mx-auto"
+                            >
+                              {settledPayments.regular[index] ? (
+                                <>
+                                  <FaCheck className="mr-2" />
+                                  Marked as Settled
+                                </>
+                              ) : (
+                                <>
+                                  <FaMoneyBillWave className="mr-2" />
+                                  Mark as Settled
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </Card>
                       </motion.div>
                     ))
@@ -402,7 +602,7 @@ function HomeContent() {
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: index * 0.1 }}
                       >
-                        <Card className="p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative">
+                        <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${settledPayments.smart[index] ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
                           <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-purple-500"></div>
                           <div className="absolute top-1 right-1">
                             <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-blue-900 dark:text-blue-300 flex items-center">
@@ -410,6 +610,14 @@ function HomeContent() {
                               Smart
                             </span>
                           </div>
+                          {settledPayments.smart[index] && (
+                            <div className="absolute top-1 right-20">
+                              <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-green-900 dark:text-green-300 flex items-center">
+                                <FaCheck className="mr-1" size={10} />
+                                Settled
+                              </span>
+                            </div>
+                          )}
                           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                             <div className="text-center sm:text-left">
                               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white mx-auto sm:mx-0 mb-2 sm:mb-0 shadow-md">
@@ -438,6 +646,28 @@ function HomeContent() {
                               </p>
                             </div>
                           </div>
+                          
+                          {/* Mark as Settled Button */}
+                          <div className="mt-4 text-center">
+                            <Button
+                              variant={settledPayments.smart[index] ? "success" : "outline"}
+                              size="sm"
+                              onClick={() => handleMarkSettled(index, 'smart')}
+                              className="flex items-center mx-auto"
+                            >
+                              {settledPayments.smart[index] ? (
+                                <>
+                                  <FaCheck className="mr-2" />
+                                  Marked as Settled
+                                </>
+                              ) : (
+                                <>
+                                  <FaMoneyBillWave className="mr-2" />
+                                  Mark as Settled
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </Card>
                       </motion.div>
                     ))
@@ -457,8 +687,16 @@ function HomeContent() {
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: index * 0.1 }}
                           >
-                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-green-50/50 dark:bg-green-900/20' : 'bg-red-50/50 dark:bg-red-900/20'}`}>
+                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${settledPayments.regular[index] ? 'bg-green-50 dark:bg-green-900/20' : ''}`}>
                               <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-green-500 to-green-700' : 'bg-gradient-to-b from-red-500 to-red-700'}`}></div>
+                              {settledPayments.regular[index] && (
+                                <div className="absolute top-1 right-1">
+                                  <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-green-900 dark:text-green-300 flex items-center">
+                                    <FaCheck className="mr-1" size={10} />
+                                    Settled
+                                  </span>
+                                </div>
+                              )}
                               <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                                 {isReceiving ? (
                                   // This friend is receiving money
@@ -522,6 +760,28 @@ function HomeContent() {
                                   </>
                                 )}
                               </div>
+                              
+                              {/* Mark as Settled Button */}
+                              <div className="mt-4 text-center">
+                                <Button
+                                  variant={settledPayments.regular[index] ? "success" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleMarkSettled(index, 'regular')}
+                                  className="flex items-center mx-auto"
+                                >
+                                  {settledPayments.regular[index] ? (
+                                    <>
+                                      <FaCheck className="mr-2" />
+                                      Marked as Settled
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FaMoneyBillWave className="mr-2" />
+                                      Mark as Settled
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
                             </Card>
                           </motion.div>
                         );
@@ -558,7 +818,7 @@ function HomeContent() {
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: index * 0.1 }}
                           >
-                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${isReceiving ? 'bg-blue-50/50 dark:bg-blue-900/20' : 'bg-indigo-50/50 dark:bg-indigo-900/20'}`}>
+                            <Card className={`p-5 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden bg-white dark:bg-gray-800 border-0 relative ${settledPayments.smart[index] ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
                               <div className={`absolute top-0 left-0 w-1 h-full ${isReceiving ? 'bg-gradient-to-b from-blue-500 to-blue-700' : 'bg-gradient-to-b from-indigo-500 to-indigo-700'}`}></div>
                               <div className="absolute top-1 right-1">
                                 <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-blue-900 dark:text-blue-300 flex items-center">
@@ -566,6 +826,14 @@ function HomeContent() {
                                   Smart
                                 </span>
                               </div>
+                              {settledPayments.smart[index] && (
+                                <div className="absolute top-1 right-20">
+                                  <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full dark:bg-green-900 dark:text-green-300 flex items-center">
+                                    <FaCheck className="mr-1" size={10} />
+                                    Settled
+                                  </span>
+                                </div>
+                              )}
                               <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                                 {isReceiving ? (
                                   // This friend is receiving money
@@ -629,6 +897,28 @@ function HomeContent() {
                                   </>
                                 )}
                               </div>
+                              
+                              {/* Mark as Settled Button */}
+                              <div className="mt-4 text-center">
+                                <Button
+                                  variant={settledPayments.smart[index] ? "success" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleMarkSettled(index, 'smart')}
+                                  className="flex items-center mx-auto"
+                                >
+                                  {settledPayments.smart[index] ? (
+                                    <>
+                                      <FaCheck className="mr-2" />
+                                      Marked as Settled
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FaMoneyBillWave className="mr-2" />
+                                      Mark as Settled
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
                             </Card>
                           </motion.div>
                         );
@@ -672,6 +962,35 @@ function HomeContent() {
             </Card>
           </motion.div>
         )}
+      </div>
+      
+      <div className="mt-8 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
+        <div className="flex justify-between items-center">
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Total Settlements</h3>
+          <div className="flex items-center">
+            <div className="group relative">
+              <FaInfoCircle className="text-gray-400 cursor-pointer hover:text-primary transition-colors mr-2" size={14} />
+              <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-white dark:bg-gray-800 rounded-md shadow-lg text-xs text-gray-600 dark:text-gray-300 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-10">
+                <p className="font-semibold mb-1">About Settlements:</p>
+                <p className="mb-2">Settlements show who owes money to whom based on all expenses across trips.</p>
+                <p className="mb-1"><span className="font-medium">Regular:</span> Minimizes the number of transactions but may involve more people.</p>
+                <p><span className="font-medium">Smart:</span> Optimizes for simpler payments between fewer people.</p>
+                <div className="absolute bottom-0 right-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-white dark:bg-gray-800"></div>
+              </div>
+            </div>
+            {areAllSettlementsSettled(settlementType) ? (
+              <span className="text-green-600 dark:text-green-400 font-medium flex items-center">
+                <FaCheck className="mr-1" size={12} />
+                No settlements needed
+              </span>
+            ) : (
+              <span className="text-xl font-bold text-primary">
+                <IndianRupee className="h-5 w-5 inline mr-1" />
+                {formatCurrency(calculateTotalSettlements(settlementType))}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

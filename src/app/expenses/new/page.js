@@ -30,13 +30,31 @@ function ExpensePageContent() {
           setTripId(rawTripId);
           
           console.log("Fetching trip with ID:", rawTripId);
-          const trip = await getTripById(rawTripId);
+          
+          // Add retry logic to handle race conditions
+          let trip = null;
+          let retryCount = 0;
+          const maxRetries = 3;
+          
+          while (!trip && retryCount < maxRetries) {
+            trip = await getTripById(rawTripId);
+            
+            if (!trip) {
+              console.log(`Trip not found on attempt ${retryCount + 1}, retrying...`);
+              retryCount++;
+              
+              if (retryCount < maxRetries) {
+                // Wait before retrying to allow database sync
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+          }
           
           if (trip) {
             setTripName(trip.name);
             setLoadError(null);
           } else {
-            console.error("Trip not found for ID:", rawTripId);
+            console.error("Trip not found for ID after retries:", rawTripId);
             setLoadError(`Trip not found. Please check if the trip with ID ${rawTripId} exists.`);
             // Keep the tripId so the user can still go back
           }
@@ -57,7 +75,7 @@ function ExpensePageContent() {
     if (!loading) {
       fetchTripData();
     }
-  }, [getTripById, loading, searchParams]);
+  }, [searchParams, getTripById, loading]);
 
   if (loading || isLoading) {
     return (
