@@ -231,6 +231,15 @@ export function ExpenseProvider({ children }) {
     }
   }, []);
 
+  // Load data once on mount. Without this the initial `loading` state never
+  // clears, leaving pages like /trips and /dashboard stuck on their spinner.
+  // (The Supabase→Postgres migration dropped the original mount effect along
+  // with the realtime subscriptions it also set up; mutations now refresh via
+  // refreshDataOnce instead.)
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   // Refresh data once and prevent further refreshes
   const refreshDataOnce = useCallback(async () => {
     console.log('Refreshing data once');
